@@ -1,0 +1,832 @@
+/* Nabla
+ *
+ * Visual reference: cyanotype blueprints and printed astronomical plates.
+ * Light theme is warm paper and ink; dark is observatory night, never black.
+ * Both carry the same Prussian-blue accent so the toggle reads as one object
+ * under two lights. All display text is set in Computer Modern (KaTeX_Main) —
+ * already loaded for the math, so the typeface of the results is also the
+ * typeface of the interface.
+ */
+
+:root {
+  --ui: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+          "Liberation Mono", monospace;
+  --serif: "KaTeX_Main", "Latin Modern Roman", "Computer Modern", Georgia,
+           "Times New Roman", serif;
+
+  --gap: 16px;
+  --rule-w: 1px;
+  --radius: 3px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --app-height: 100dvh;
+}
+
+:root[data-theme="light"] {
+  --paper: #f4f1ea;
+  --raised: #fbf9f4;
+  --sunk: #ebe6db;
+  --ink: #1a1a17;
+  --ink-soft: #55524a;
+  --ink-faint: #8c887c;
+  --rule: #d9d3c5;
+  --rule-strong: #b9b1a0;
+  --accent: #1b3a5c;
+  --accent-soft: #2c5f8a;
+  --accent-wash: #e3e7ec;
+  --amber: #a3650f;
+  --error: #8c2f1f;
+  --error-wash: #f2e5e1;
+  --s1: #1b3a5c;
+  --s2: #a3650f;
+  --s3: #2f6e62;
+  --s4: #6b3a5e;
+  --grid: rgba(26, 26, 23, 0.09);
+}
+
+:root[data-theme="dark"] {
+  --paper: #0e1420;
+  --raised: #151d2c;
+  --sunk: #0a0f19;
+  --ink: #e8e4da;
+  --ink-soft: #a9a79e;
+  --ink-faint: #6e7482;
+  --rule: #232f45;
+  --rule-strong: #35435e;
+  --accent: #7fb3d5;
+  --accent-soft: #a8cde6;
+  --accent-wash: #16263a;
+  --amber: #e0a458;
+  --error: #e69083;
+  --error-wash: #2a1a1a;
+  --s1: #7fb3d5;
+  --s2: #e0a458;
+  --s3: #6fc3ae;
+  --s4: #c89bd1;
+  --grid: rgba(232, 228, 218, 0.10);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  height: var(--app-height);
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--ui);
+  font-size: 16px;
+  line-height: 1.5;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button, input, select { font: inherit; color: inherit; }
+
+code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  background: var(--sunk);
+  padding: 0.08em 0.34em;
+  border-radius: var(--radius);
+}
+
+::selection { background: var(--accent-wash); }
+
+/* Small-caps plate captions: serif, uppercase, widely tracked. */
+.caption {
+  font-family: var(--serif);
+  font-size: 10.5px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* ---------------------------------------------------------------- boot --- */
+
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: var(--paper);
+  padding: 24px;
+  transition: opacity 0.45s ease, visibility 0.45s;
+}
+.boot[hidden] { display: grid; opacity: 0; visibility: hidden; pointer-events: none; }
+
+.boot__inner { text-align: center; max-width: 22rem; }
+
+.boot__mark {
+  font-family: var(--serif);
+  font-size: 68px;
+  line-height: 1;
+  color: var(--accent);
+  animation: breathe 2.6s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .boot__mark { animation: none; opacity: 1; }
+}
+
+.boot__name {
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  text-transform: uppercase;
+  margin: 14px 0 26px;
+}
+
+.boot__status {
+  font-size: 13px;
+  color: var(--ink-soft);
+  margin: 0 0 12px;
+  min-height: 1.4em;
+}
+
+.boot__bar {
+  height: 2px;
+  background: var(--rule);
+  overflow: hidden;
+}
+.boot__bar i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 0.5s ease;
+}
+
+.boot__note {
+  margin: 18px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-faint);
+}
+
+.boot--failed .boot__mark { animation: none; color: var(--error); }
+
+/* -------------------------------------------------------------- topbar --- */
+
+.topbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px var(--gap);
+  padding-top: calc(10px + env(safe-area-inset-top, 0px));
+  border-bottom: var(--rule-w) solid var(--rule-strong);
+  box-shadow: 0 3px 0 -2px var(--rule);   /* double rule, title-page style */
+  background: var(--paper);
+}
+
+.brand { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+
+.brand__mark {
+  font-family: var(--serif);
+  font-size: 21px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.brand__name {
+  font-family: var(--serif);
+  font-size: 13px;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.topbar__actions { display: flex; gap: 2px; }
+
+.iconbtn {
+  appearance: none;
+  background: none;
+  border: 0;
+  color: var(--ink-faint);
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.iconbtn:hover { color: var(--ink); }
+.iconbtn:active { background: var(--sunk); }
+.iconbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* -------------------------------------------------------------- stream --- */
+
+.stream {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  padding: 0 var(--gap) calc(12px + var(--safe-b));
+}
+.stream:focus { outline: none; }
+
+.intro {
+  padding: 30px 2px 12px;
+  color: var(--ink-soft);
+}
+.intro__lede {
+  font-family: var(--serif);
+  font-size: 18px;
+  line-height: 1.45;
+  color: var(--ink);
+  margin: 0 0 22px;
+  text-wrap: balance;
+}
+.intro__list {
+  list-style: none;
+  margin: 0 0 22px;
+  padding: 0;
+  font-size: 13.5px;
+}
+.intro__list li {
+  padding: 8px 0;
+  border-top: var(--rule-w) solid var(--rule);
+  color: var(--ink-soft);
+}
+.intro__list b {
+  font-family: var(--serif);
+  font-weight: 400;
+  color: var(--accent);
+  display: inline-block;
+  min-width: 3.4em;
+}
+.intro__foot {
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--ink-faint);
+  margin: 0;
+  padding-top: 14px;
+  border-top: var(--rule-w) solid var(--rule);
+}
+
+/* --------------------------------------------------------------- cards --- */
+
+/* Newest sits directly under the composer, so the rule goes below each card
+ * and the last one needs none. */
+.card {
+  padding: 20px 0 24px;
+  border-bottom: var(--rule-w) solid var(--rule);
+  animation: rise 0.32s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.card:last-of-type { border-bottom: 0; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .card { animation: none; }
+}
+
+.card__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.card__op {
+  font-family: var(--serif);
+  font-size: 10.5px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.card__meta {
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card__time {
+  font-size: 10.5px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.card__source {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--ink-faint);
+  margin-bottom: 12px;
+  overflow-x: auto;
+  white-space: nowrap;
+  padding-bottom: 2px;
+}
+
+.card__statement {
+  font-size: 15px;
+  color: var(--ink-soft);
+  margin-bottom: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* The result plate: raised stock, crop marks at opposing corners. */
+.card__result {
+  position: relative;
+  background: var(--raised);
+  padding: 22px 18px;
+  margin: 0 -2px;
+  font-size: 21px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.card__result::before,
+.card__result::after {
+  content: "";
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  pointer-events: none;
+}
+.card__result::before {
+  top: 0; left: 0;
+  border-top: var(--rule-w) solid var(--rule-strong);
+  border-left: var(--rule-w) solid var(--rule-strong);
+}
+.card__result::after {
+  bottom: 0; right: 0;
+  border-bottom: var(--rule-w) solid var(--rule-strong);
+  border-right: var(--rule-w) solid var(--rule-strong);
+}
+
+.card__note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--amber);
+}
+
+.roots { display: flex; flex-direction: column; gap: 12px; }
+.root { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.root__approx {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+.root__tag {
+  font-family: var(--serif);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.alts {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+/* Label above the maths, not beside it: "combined fraction" never fits a
+ * fixed column, and baseline-aligning a caption against a tall fraction puts
+ * it halfway down the numerator. */
+.alt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 10px 2px;
+  border-top: var(--rule-w) dotted var(--rule);
+  font-size: 15px;
+  min-width: 0;
+}
+.alt__label {
+  font-family: var(--serif);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+}
+.alt__body { align-self: stretch; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+
+.card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 14px;
+}
+.act {
+  appearance: none;
+  background: none;
+  border: var(--rule-w) solid transparent;
+  color: var(--ink-faint);
+  font-family: var(--serif);
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  padding: 6px 9px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.act:hover { color: var(--ink); border-color: var(--rule); }
+.act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.act--danger { margin-left: auto; }
+.act--danger:hover { color: var(--error); border-color: var(--error); }
+
+.card--error .card__op { color: var(--error); }
+.card__error {
+  background: var(--error-wash);
+  border-left: 2px solid var(--error);
+  padding: 13px 15px;
+  font-size: 14px;
+  color: var(--ink);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+/* --------------------------------------------------------------- plots --- */
+
+.chart {
+  position: relative;
+  height: 258px;
+  margin: 4px 0 2px;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 10px;
+}
+.legend__item { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.legend__swatch { width: 14px; height: 2px; flex: 0 0 auto; }
+
+/* --------------------------------------------------------------- table --- */
+
+.vt__wrap {
+  max-height: 300px;
+  overflow: auto;
+  border-top: var(--rule-w) solid var(--rule);
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+.vt {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.vt th {
+  position: sticky;
+  top: 0;
+  background: var(--paper);
+  text-align: right;
+  padding: 8px 12px;
+  border-bottom: var(--rule-w) solid var(--rule-strong);
+  font-family: var(--serif);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.vt td {
+  text-align: right;
+  padding: 6px 12px;
+  border-bottom: var(--rule-w) solid var(--rule);
+  white-space: nowrap;
+}
+.vt tr:last-child td { border-bottom: 0; }
+.vt td.undef { color: var(--ink-faint); }
+
+/* ------------------------------------------------------------ composer --- */
+
+.composer {
+  flex: 0 0 auto;
+  background: var(--paper);
+  border-bottom: var(--rule-w) solid var(--rule-strong);
+  box-shadow: 0 3px 0 -2px var(--rule);
+  padding: 4px var(--gap) 12px;
+}
+
+/* Sits directly under the input, so you read down: typed → parsed → result.
+ * Collapses entirely when empty rather than holding dead space, and only ever
+ * displaces the results below it — never the input itself. */
+.preview {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 40px;
+  padding: 10px 0 0;
+  font-size: 17px;
+  color: var(--ink);
+  overflow-x: auto;
+  overflow-y: hidden;
+  transition: opacity 0.2s;
+}
+.preview:empty { min-height: 0; padding: 0; }
+.preview--stale { opacity: 0.32; }
+
+.chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 8px;
+  scroll-snap-type: x proximity;
+}
+.chips::-webkit-scrollbar { display: none; }
+
+.chip {
+  appearance: none;
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  background: none;
+  border: var(--rule-w) solid var(--rule);
+  color: var(--ink-soft);
+  border-radius: 999px;
+  padding: 7px 14px;
+  min-height: 34px;
+  font-family: var(--serif);
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.chip[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--paper);
+}
+.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.params {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding-bottom: 8px;
+}
+.params:empty { display: none; }
+
+.field { display: flex; align-items: center; gap: 6px; }
+.field__label {
+  font-family: var(--serif);
+  font-size: 9.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+.field__input {
+  background: var(--sunk);
+  border: var(--rule-w) solid transparent;
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  min-height: 32px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+  width: 5.2em;
+  min-width: 0;
+}
+.field__input--narrow { width: 3.4em; }
+
+.field input[type="checkbox"] {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  flex: 0 0 auto;
+  border: var(--rule-w) solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--sunk);
+  cursor: pointer;
+  position: relative;
+}
+.field input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.field input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 1px;
+  width: 5px;
+  height: 10px;
+  border: solid var(--paper);
+  border-width: 0 2px 2px 0;
+  transform: rotate(43deg);
+}
+.field input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.field:has(input[type="checkbox"]) .field__label { cursor: pointer; }
+.field__input:focus { outline: none; border-color: var(--accent); background: var(--raised); }
+
+.field__toggle {
+  display: flex;
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.field__toggle button {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 6px 11px;
+  min-height: 32px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.field__toggle button[aria-pressed="true"] { background: var(--accent); color: var(--paper); }
+
+.symbols {
+  display: none;
+  gap: 5px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 8px;
+}
+.symbols::-webkit-scrollbar { display: none; }
+.composer:focus-within .symbols { display: flex; }
+
+.sym {
+  appearance: none;
+  flex: 0 0 auto;
+  min-width: 38px;
+  min-height: 34px;
+  background: var(--sunk);
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  font-family: var(--serif);
+  font-size: 15px;
+  cursor: pointer;
+}
+.sym:active { background: var(--accent); color: var(--paper); }
+
+.entry { display: flex; gap: 8px; align-items: stretch; }
+
+.entry__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--sunk);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  min-height: 48px;
+  font-family: var(--mono);
+  font-size: 16px;             /* 16px keeps iOS from zooming on focus */
+  color: var(--ink);
+}
+.entry__input::placeholder { color: var(--ink-faint); }
+.entry__input:focus { outline: none; border-color: var(--accent); background: var(--raised); }
+
+.entry__go {
+  flex: 0 0 auto;
+  width: 48px;
+  min-height: 48px;
+  background: var(--accent);
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--paper);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.entry__go:disabled { opacity: 0.4; cursor: default; }
+.entry__go:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+.entry__go[data-busy="true"] {
+  background: var(--sunk);
+  color: var(--accent);
+}
+
+/* --------------------------------------------------------------- toast --- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(28px + var(--safe-b));
+  transform: translate(-50%, 10px);
+  z-index: 30;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12.5px;
+  padding: 9px 15px;
+  border-radius: 999px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  max-width: calc(100vw - 40px);
+  text-align: center;
+}
+.toast--on { opacity: 1; transform: translate(-50%, 0); }
+
+/* Only the undo form accepts taps; a plain notice must stay click-through. */
+.toast--interactive {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-right: 6px;
+}
+
+.toast__action {
+  appearance: none;
+  background: none;
+  border: 0;
+  /* The toast inverts the page, so its own foreground is the only colour
+   * guaranteed to contrast in both themes. */
+  color: var(--paper);
+  font-family: var(--serif);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.toast__action:hover { background: rgba(128, 128, 128, 0.28); }
+.toast__action:focus-visible { outline: 2px solid var(--paper); outline-offset: 1px; }
+
+/* ---------------------------------------------------------------- math --- */
+
+.katex { font-size: 1.05em; }
+.katex-display { margin: 0; }
+.katex-display > .katex { text-align: left; }
+.preview .katex-display, .card__result .katex-display { text-align: left; }
+
+/* Long expressions scroll inside their own box rather than the page. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0 6px;
+}
+
+/* Keep the scroll affordance discreet — a chunky bar under every equation
+ * would fight the typesetting. */
+.card__result, .card__statement, .card__source, .alt__body, .katex-display, .vt__wrap {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-strong) transparent;
+}
+.card__result::-webkit-scrollbar,
+.card__statement::-webkit-scrollbar,
+.card__source::-webkit-scrollbar,
+.alt__body::-webkit-scrollbar,
+.katex-display::-webkit-scrollbar,
+.vt__wrap::-webkit-scrollbar { height: 5px; width: 5px; }
+.card__result::-webkit-scrollbar-thumb,
+.card__statement::-webkit-scrollbar-thumb,
+.card__source::-webkit-scrollbar-thumb,
+.alt__body::-webkit-scrollbar-thumb,
+.katex-display::-webkit-scrollbar-thumb,
+.vt__wrap::-webkit-scrollbar-thumb { background: var(--rule-strong); border-radius: 3px; }
+.card__result::-webkit-scrollbar-track,
+.card__statement::-webkit-scrollbar-track,
+.card__source::-webkit-scrollbar-track,
+.alt__body::-webkit-scrollbar-track,
+.katex-display::-webkit-scrollbar-track,
+.vt__wrap::-webkit-scrollbar-track { background: transparent; }
+
+/* The preview is transient — no bar at all, it still drags on touch. */
+.preview { scrollbar-width: none; }
+.preview::-webkit-scrollbar { display: none; }
+
+/* -------------------------------------------------------------- widths --- */
+
+/* Rules stay full-bleed like ruled stock; content holds a 680px measure. */
+@media (min-width: 620px) {
+  :root { --gap: 24px; }
+  .topbar, .stream, .composer {
+    padding-inline: max(var(--gap), calc(50vw - 340px));
+  }
+  .card__result { font-size: 24px; }
+  .chart { height: 320px; }
+}

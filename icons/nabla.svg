@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Nabla">
+  <rect width="512" height="512" fill="#f4f1ea"/>
+  <rect x="33.79" y="33.79" width="444.42" height="444.42"
+        fill="none" stroke="#b9b1a0" stroke-width="2.82"/>
+  <polygon points="126.08,180.99 385.92,180.99 256.00,406.02" fill="none" stroke="#1b3a5c"
+           stroke-width="48.01" stroke-linejoin="miter"/>
+</svg>
