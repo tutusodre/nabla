@@ -71,8 +71,10 @@ _FUNCTIONS = {
 
     # Brazilian notation, accepted in either language. Aliases only — `sin`
     # and `tan` keep working, and results still print in SymPy's spelling.
+    # `tg` is deliberately absent: it would capture `t*g`, and t and g are
+    # both ordinary variables here. Write `tan`.
     "sen": sp.sin, "senh": sp.sinh, "arcsen": sp.asin,
-    "tg": sp.tan, "tgh": sp.tanh, "arctg": sp.atan,
+    "tgh": sp.tanh, "arctg": sp.atan,
     "cotg": sp.cot, "cossec": sp.csc,
 }
 

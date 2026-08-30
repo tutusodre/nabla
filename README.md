@@ -103,6 +103,10 @@ shed and the write retried.
 - Constants: `pi`, `e`, `oo` (and `-oo`). Imaginary unit is `I`, not `i` —
   lowercase `i` and `j` stay free as ordinary variables, which matters when
   `i` is a current and `j` is an index.
+- Brazilian notation is accepted in either language as aliases: `sen`, `senh`,
+  `arcsen`, `arctg`, `cotg`, `cossec`, `tgh`. `tg` is deliberately *not* one of
+  them — it would swallow `t*g`, and both are ordinary variables here. Use
+  `tan`.
 - Equations accept an `=`: `x^2 = 4` and `x^2 - 4` both solve.
 - Leave both integral bounds empty for an indefinite integral.
 - Plot takes up to four comma-separated functions; commas inside a call like

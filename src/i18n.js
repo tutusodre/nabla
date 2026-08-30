@@ -149,7 +149,7 @@
       'intro.foot': 'Constantes: <code>pi</code>, <code>e</code>, <code>oo</code>. <br>'
         + '<code>ln</code> é o logaritmo natural, <code>log</code> é base&nbsp;10 '
         + '(<code>log(x, 2)</code> para outra base). '
-        + 'Também aceita <code>sen</code>, <code>tg</code>, <code>cotg</code> e <code>arcsen</code>.',
+        + 'Também aceita <code>sen</code>, <code>cotg</code>, <code>arcsen</code> e <code>arctg</code>.',
 
       'op.derivative': 'Derivada',
       'op.integral': 'Integral',
