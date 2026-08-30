@@ -10,45 +10,49 @@ const PYODIDE_BASE = `https://cdn.jsdelivr.net/pyodide/${PYODIDE_VERSION}/full/`
 importScripts(`${PYODIDE_BASE}pyodide.js`);
 
 let compute = null;
+let language = 'en';
 
 function post(message) {
   self.postMessage(message);
 }
 
 async function boot() {
-  post({ type: 'status', progress: 0.05, text: 'Fetching Python runtime' });
+  post({ type: 'status', progress: 0.05, key: 'boot.runtime' });
   const pyodide = await loadPyodide({ indexURL: PYODIDE_BASE });
 
-  post({ type: 'status', progress: 0.35, text: 'Loading SymPy and NumPy' });
+  post({ type: 'status', progress: 0.35, key: 'boot.packages' });
   await pyodide.loadPackage(['sympy', 'numpy']);
 
-  post({ type: 'status', progress: 0.85, text: 'Starting math kernel' });
+  post({ type: 'status', progress: 0.85, key: 'boot.kernel' });
   const source = await (await fetch('./math.py')).text();
   pyodide.runPython(source);
   compute = pyodide.globals.get('compute');
 
-  post({ type: 'status', progress: 1, text: 'Ready' });
+  post({ type: 'status', progress: 1, key: 'boot.ready' });
   post({ type: 'ready' });
 }
 
 boot().catch((err) => {
   post({
     type: 'fatal',
-    error: `Couldn't start the math engine — ${err && err.message ? err.message : err}`,
+    key: 'boot.failed',
+    detail: err && err.message ? err.message : String(err),
   });
 });
 
 self.onmessage = (event) => {
-  const { id, op, args } = event.data || {};
+  const { id, op, args, lang } = event.data || {};
+  if (lang) language = lang;
   if (!compute) {
-    post({ id, type: 'result', ok: false, error: 'The math engine is still starting.' });
+    post({ id, type: 'result', ok: false, errorKey: 'boot.starting' });
     return;
   }
   try {
-    const raw = compute(op, JSON.stringify(args || {}));
+    // The kernel formats its own messages, so it needs the language too.
+    const raw = compute(op, JSON.stringify(args || {}), language);
     const payload = JSON.parse(raw);
     post({ id, type: 'result', ok: payload.ok, data: payload.data, error: payload.error });
   } catch (err) {
-    post({ id, type: 'result', ok: false, error: 'The math engine hit an unexpected problem.' });
+    post({ id, type: 'result', ok: false, errorKey: 'boot.crashed' });
   }
 };

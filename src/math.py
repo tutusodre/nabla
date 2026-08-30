@@ -68,6 +68,12 @@ _FUNCTIONS = {
     "factorial": sp.factorial, "gamma": sp.gamma, "erf": sp.erf,
     "min": sp.Min, "max": sp.Max, "Min": sp.Min, "Max": sp.Max,
     "conjugate": sp.conjugate, "re": sp.re, "im": sp.im, "arg": sp.arg,
+
+    # Brazilian notation, accepted in either language. Aliases only — `sin`
+    # and `tan` keep working, and results still print in SymPy's spelling.
+    "sen": sp.sin, "senh": sp.sinh, "arcsen": sp.asin,
+    "tg": sp.tan, "tgh": sp.tanh, "arctg": sp.atan,
+    "cotg": sp.cot, "cossec": sp.csc,
 }
 
 # Order matters: constants shadow bare symbols, functions shadow both.
@@ -82,7 +88,94 @@ _CLOSERS = ")]}"
 
 
 class MathError(Exception):
-    """An error whose message is already safe to show the user."""
+    """An error whose message is already safe to show the user.
+
+    The template is kept unformatted so it can be looked up for translation;
+    interpolation happens after, in whichever language was picked.
+    """
+
+    def __init__(self, template, *values):
+        super().__init__(template % values if values else template)
+        self.template = template
+        self.values = values
+
+
+# Translations keyed by the English source string, so untranslated messages
+# simply fall through to English instead of showing a missing-key marker.
+LANGUAGE = "en"
+
+MESSAGES = {
+    "pt": {
+        "Type an expression first.": "Digite uma expressão primeiro.",
+        "An equation needs an expression on both sides of `=`.":
+            "Uma equação precisa de expressões dos dois lados do `=`.",
+        "“%s” isn’t a valid variable name.":
+            "“%s” não é um nome de variável válido.",
+        "“%s” is a built-in constant or function — pick another variable.":
+            "“%s” é uma constante ou função interna — escolha outra variável.",
+        "%s must be a plain number.": "%s precisa ser um número.",
+        "%s must be finite.": "%s precisa ser finito.",
+        "Order must be a whole number.": "A ordem precisa ser um número inteiro.",
+        "Order must be between 1 and 10.": "A ordem precisa estar entre 1 e 10.",
+        "No closed-form antiderivative for that one.":
+            "Essa não tem primitiva em forma fechada.",
+        "No closed form, and numeric integration failed.":
+            "Sem forma fechada, e a integração numérica falhou.",
+        "No closed form — evaluated numerically.":
+            "Sem forma fechada — calculada numericamente.",
+        "SymPy couldn’t determine that limit.":
+            "O SymPy não conseguiu determinar esse limite.",
+        "SymPy couldn’t solve that symbolically.":
+            "O SymPy não conseguiu resolver isso simbolicamente.",
+        "No real solutions — turn on “complex” to see the %d complex root(s).":
+            "Sem soluções reais — ative “complexo” para ver %d raiz(es) complexa(s).",
+        "No solutions found.": "Nenhuma solução encontrada.",
+        "Type at least one function to plot.":
+            "Digite pelo menos uma função para traçar.",
+        "Four functions at a time is the limit.":
+            "O limite é quatro funções por vez.",
+        "x-max has to be greater than x-min.":
+            "x-máx precisa ser maior que x-mín.",
+        "“%s” has more than one variable — plot needs exactly one.":
+            "“%s” tem mais de uma variável — o gráfico precisa de exatamente uma.",
+        "Couldn’t evaluate “%s” numerically.":
+            "Não consegui avaliar “%s” numericamente.",
+        "Couldn’t evaluate that function numerically.":
+            "Não consegui avaliar essa função numericamente.",
+        "Step can’t be zero.": "O passo não pode ser zero.",
+        "That step points away from the stop value.":
+            "Esse passo se afasta do valor final.",
+        "Can’t parse that — check your parentheses and operators.":
+            "Não consegui interpretar — confira os parênteses e operadores.",
+        "That divides by zero.": "Isso divide por zero.",
+        "That expression nests too deeply.":
+            "A expressão tem aninhamento demais.",
+        "SymPy couldn’t finish that one.":
+            "O SymPy não conseguiu terminar essa.",
+        "SymPy couldn’t treat that as a polynomial.":
+            "O SymPy não conseguiu tratar isso como polinômio.",
+        "That needs a concrete value somewhere — try fewer free variables.":
+            "Falta um valor concreto em algum lugar — tente com menos variáveis livres.",
+        "Couldn’t compute that — %s": "Não consegui calcular — %s",
+        "Unknown operation “%s”.": "Operação desconhecida “%s”.",
+        "x-min": "x-mín",
+        "x-max": "x-máx",
+        "Start": "Início",
+        "Stop": "Fim",
+        "Step": "Passo",
+        "simplified": "simplificado",
+        "factored": "fatorado",
+        "expanded": "expandido",
+        "trig form": "forma trig.",
+        "combined fraction": "fração única",
+        "decimal": "decimal",
+        "solve for": "resolver para",
+    },
+}
+
+
+def _t(text):
+    return MESSAGES.get(LANGUAGE, {}).get(text, text)
 
 
 # --------------------------------------------------------------------------
@@ -145,11 +238,11 @@ def _parse_equation(src):
 def _sym(name):
     name = (name or "x").strip() or "x"
     if not _NAME_RE.match(name):
-        raise MathError("“%s” isn’t a valid variable name." % name)
+        raise MathError("“%s” isn’t a valid variable name.", name)
     known = LOCALS.get(name)
     if known is not None and not isinstance(known, sp.Symbol):
         raise MathError(
-            "“%s” is a built-in constant or function — pick another variable." % name
+            "“%s” is a built-in constant or function — pick another variable.", name
         )
     return known if known is not None else sp.Symbol(name)
 
@@ -164,9 +257,9 @@ def _parse_float(src, label):
     try:
         out = float(sp.N(value))
     except (TypeError, ValueError):
-        raise MathError("%s must be a plain number." % label)
+        raise MathError("%s must be a plain number.", _t(label))
     if not np.isfinite(out):
-        raise MathError("%s must be finite." % label)
+        raise MathError("%s must be finite.", _t(label))
     return out
 
 
@@ -240,7 +333,7 @@ def _alternate(label, expr, *against):
                 return None
     except Exception:
         return None
-    return {"label": label, **_fmt(expr)}
+    return {"label": _t(label), **_fmt(expr)}
 
 
 def _symbol_names(expr):
@@ -337,7 +430,7 @@ def op_integral(source="", variable="x", lower=None, upper=None):
             "statement": statement,
             "latex": _latex(numeric),
             "text": _text(numeric),
-            "note": "No closed form — evaluated numerically.",
+            "note": _t("No closed form — evaluated numerically."),
             "alternates": [],
         }
 
@@ -436,14 +529,14 @@ def op_solve(source="", variable="x", complex_roots=False):
     if not shown:
         if complex_ and not complex_roots:
             raise MathError(
-                "No real solutions — turn on “complex” to see the %d complex root(s)."
-                % len(complex_)
+                "No real solutions — turn on “complex” to see the %d complex root(s).",
+                len(complex_),
             )
         raise MathError("No solutions found.")
 
     return {
-        "statement": r"%s,\quad \text{solve for } %s" % (
-            _latex(equation), _latex(var),
+        "statement": r"%s,\quad \text{%s } %s" % (
+            _latex(equation), _t("solve for"), _latex(var),
         ),
         "roots": shown,
         "hidden_complex": len(complex_) if not complex_roots else 0,
@@ -476,7 +569,7 @@ def op_plot(source="", x_min="-10", x_max="10", samples=700):
         free = sorted(expr.free_symbols, key=lambda s: s.name)
         if len(free) > 1:
             raise MathError(
-                "“%s” has more than one variable — plot needs exactly one." % part
+                "“%s” has more than one variable — plot needs exactly one.", part
             )
         var = free[0] if free else sp.Symbol("x")
 
@@ -485,7 +578,7 @@ def op_plot(source="", x_min="-10", x_max="10", samples=700):
             with np.errstate(all="ignore"):
                 raw = np.asarray(fn(xs))
         except Exception:
-            raise MathError("Couldn’t evaluate “%s” numerically." % part)
+            raise MathError("Couldn’t evaluate “%s” numerically.", part)
 
         if np.iscomplexobj(raw):
             raw = np.where(np.abs(raw.imag) < 1e-9, raw.real, np.nan)
@@ -593,31 +686,39 @@ def _friendly(exc):
     from tokenize import TokenError
 
     if isinstance(exc, MathError):
-        return str(exc)
+        template = _t(exc.template)
+        return template % exc.values if exc.values else template
     if isinstance(exc, (SyntaxError, TokenError)):
-        return "Can’t parse that — check your parentheses and operators."
+        return _t("Can’t parse that — check your parentheses and operators.")
     if isinstance(exc, ZeroDivisionError):
-        return "That divides by zero."
+        return _t("That divides by zero.")
     if isinstance(exc, RecursionError):
-        return "That expression nests too deeply."
+        return _t("That expression nests too deeply.")
     if isinstance(exc, (NotImplementedError, KeyboardInterrupt)):
-        return "SymPy couldn’t finish that one."
+        return _t("SymPy couldn’t finish that one.")
     if type(exc).__name__ == "PolynomialError":
-        return "SymPy couldn’t treat that as a polynomial."
+        return _t("SymPy couldn’t treat that as a polynomial.")
     if isinstance(exc, TypeError) and "cannot determine truth value" in str(exc):
-        return "That needs a concrete value somewhere — try fewer free variables."
+        return _t("That needs a concrete value somewhere — try fewer free variables.")
 
     detail = (str(exc) or "").strip().splitlines()
     head = detail[0][:140] if detail else type(exc).__name__
-    return "Couldn’t compute that — %s" % head
+    return _t("Couldn’t compute that — %s") % head
 
 
-def compute(op, args_json):
+def set_language(lang):
+    global LANGUAGE
+    LANGUAGE = lang if lang in MESSAGES else "en"
+    return LANGUAGE
+
+
+def compute(op, args_json, lang="en"):
     """Single entry point. Always returns a JSON string, never raises."""
+    set_language(lang)
     try:
         handler = OPERATIONS[op]
     except KeyError:
-        return json.dumps({"ok": False, "error": "Unknown operation “%s”." % op})
+        return json.dumps({"ok": False, "error": _t("Unknown operation “%s”.") % op})
 
     try:
         args = json.loads(args_json) if args_json else {}

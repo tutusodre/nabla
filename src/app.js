@@ -16,86 +16,90 @@
 
   // ---------------------------------------------------------- operations --
 
+  const t = (...args) => window.NablaI18n.t(...args);
+
+  /* Strings are held as keys and resolved through t() at render time, so
+   * switching language re-renders correctly without rebuilding this table. */
   const OPS = {
     derivative: {
-      label: 'Derivative',
+      labelKey: 'op.derivative',
       chip: 'd/dx',
       placeholder: 'sin(x)^2',
       fields: [
-        { name: 'variable', label: 'wrt', kind: 'var', value: 'x' },
-        { name: 'order', label: 'order', kind: 'int', value: '1' },
+        { name: 'variable', labelKey: 'field.wrt', kind: 'var', value: 'x' },
+        { name: 'order', labelKey: 'field.order', kind: 'int', value: '1' },
       ],
-      meta: (p) => `order ${p.order} · in ${p.variable}`,
+      meta: (p) => t('meta.order', p.order, p.variable),
     },
     integral: {
-      label: 'Integral',
+      labelKey: 'op.integral',
       chip: '∫',
       placeholder: 'x^2',
       fields: [
-        { name: 'variable', label: 'd', kind: 'var', value: 'x' },
-        { name: 'lower', label: 'from', kind: 'text', value: '', placeholder: '—' },
-        { name: 'upper', label: 'to', kind: 'text', value: '', placeholder: '—' },
+        { name: 'variable', labelKey: 'field.d', kind: 'var', value: 'x' },
+        { name: 'lower', labelKey: 'field.from', kind: 'text', value: '', placeholder: '—' },
+        { name: 'upper', labelKey: 'field.to', kind: 'text', value: '', placeholder: '—' },
       ],
       meta: (p) => (p.lower && p.upper
-        ? `${p.lower} → ${p.upper} · d${p.variable}`
-        : `indefinite · d${p.variable}`),
+        ? t('meta.definite', p.lower, p.upper, p.variable)
+        : t('meta.indefinite', p.variable)),
     },
     limit: {
-      label: 'Limit',
+      labelKey: 'op.limit',
       chip: 'lim',
       placeholder: 'sin(x)/x',
       fields: [
-        { name: 'variable', label: 'var', kind: 'var', value: 'x' },
-        { name: 'point', label: 'to', kind: 'text', value: '0' },
+        { name: 'variable', labelKey: 'field.var', kind: 'var', value: 'x' },
+        { name: 'point', labelKey: 'field.to', kind: 'text', value: '0' },
         {
           name: 'direction',
-          label: 'side',
+          labelKey: 'field.side',
           kind: 'toggle',
           value: '+-',
-          options: [['+-', 'both'], ['+', '+'], ['-', '−']],
+          options: [['+-', 'field.both'], ['+', '+'], ['-', '−']],
         },
       ],
-      meta: (p) => `${p.variable} → ${p.point}` +
-        (p.direction === '+-' ? '' : ` from the ${p.direction === '+' ? 'right' : 'left'}`),
+      meta: (p) => t('meta.limit', p.variable, p.point) +
+        (p.direction === '+-' ? '' : t(p.direction === '+' ? 'meta.fromRight' : 'meta.fromLeft')),
     },
     simplify: {
-      label: 'Simplify',
-      chip: 'simplify',
+      labelKey: 'op.simplify',
+      chipKey: 'chip.simplify',
       placeholder: 'sin(x)^2 + cos(x)^2',
       fields: [],
-      meta: () => 'simplify & evaluate',
+      meta: () => t('meta.simplify'),
     },
     solve: {
-      label: 'Solve',
-      chip: 'solve',
+      labelKey: 'op.solve',
+      chipKey: 'chip.solve',
       placeholder: 'x^2 = 4',
       fields: [
-        { name: 'variable', label: 'for', kind: 'var', value: 'x' },
-        { name: 'complex_roots', label: 'complex', kind: 'check', value: false },
+        { name: 'variable', labelKey: 'field.for', kind: 'var', value: 'x' },
+        { name: 'complex_roots', labelKey: 'field.complex', kind: 'check', value: false },
       ],
-      meta: (p) => `for ${p.variable}${p.complex_roots ? ' · complex' : ''}`,
+      meta: (p) => t('meta.for', p.variable) + (p.complex_roots ? t('meta.complex') : ''),
     },
     plot: {
-      label: 'Plot',
-      chip: 'plot',
+      labelKey: 'op.plot',
+      chipKey: 'chip.plot',
       placeholder: 'sin(x), cos(x)',
       fields: [
-        { name: 'x_min', label: 'x from', kind: 'text', value: '-10' },
-        { name: 'x_max', label: 'to', kind: 'text', value: '10' },
+        { name: 'x_min', labelKey: 'field.xFrom', kind: 'text', value: '-10' },
+        { name: 'x_max', labelKey: 'field.to', kind: 'text', value: '10' },
       ],
-      meta: (p) => `x ∈ [${p.x_min}, ${p.x_max}]`,
+      meta: (p) => t('meta.range', p.x_min, p.x_max),
     },
     table: {
-      label: 'Table',
-      chip: 'table',
+      labelKey: 'op.table',
+      chipKey: 'chip.table',
       placeholder: 'x^2',
       fields: [
-        { name: 'variable', label: 'var', kind: 'var', value: 'x' },
-        { name: 'start', label: 'from', kind: 'text', value: '-5' },
-        { name: 'stop', label: 'to', kind: 'text', value: '5' },
-        { name: 'step', label: 'step', kind: 'text', value: '1' },
+        { name: 'variable', labelKey: 'field.var', kind: 'var', value: 'x' },
+        { name: 'start', labelKey: 'field.from', kind: 'text', value: '-5' },
+        { name: 'stop', labelKey: 'field.to', kind: 'text', value: '5' },
+        { name: 'step', labelKey: 'field.step', kind: 'text', value: '1' },
       ],
-      meta: (p) => `${p.start} → ${p.stop} by ${p.step}`,
+      meta: (p) => t('meta.table', p.start, p.stop, p.step),
     },
   };
 
@@ -140,7 +144,7 @@
         ['α', 'alpha'], ['β', 'beta'],
         ['λ', 'lamda'], ['μ', 'mu'], ['σ', 'sigma'], ['ε', 'epsilon'],
         ['ρ', 'rho'], ['δ', 'delta'],
-        ['abc — phone keyboard', { act: 'native', full: true }],
+        ['keypad.native', { act: 'native', full: true, i18n: true }],
       ],
     },
   ];
@@ -178,6 +182,7 @@
     keypad: $('keypad'), keypadTabs: $('keypadTabs'), keypadPages: $('keypadPages'),
     kpBack: $('kpBack'), kpToggle: $('kpToggle'),
     kswitch: $('kswitch'), kswitchBtn: $('kswitchBtn'),
+    langBtn: $('langBtn'),
   };
 
   const charts = new Map();
@@ -191,12 +196,12 @@
   function startWorker() {
     worker = new Worker('./src/worker.js');
     worker.onmessage = (event) => handleWorkerMessage(event.data || {});
-    worker.onerror = () => bootFailed('The math engine failed to load.');
+    worker.onerror = () => bootFailed(t('boot.failed'));
   }
 
   function handleWorkerMessage(msg) {
     if (msg.type === 'status') {
-      el.bootStatus.textContent = msg.text;
+      el.bootStatus.textContent = t(msg.key);
       el.bootBar.style.width = `${Math.round((msg.progress || 0) * 100)}%`;
       return;
     }
@@ -208,14 +213,16 @@
       return;
     }
     if (msg.type === 'fatal') {
-      bootFailed(msg.error);
+      bootFailed(msg.detail ? `${t(msg.key)} (${msg.detail})` : t(msg.key));
       return;
     }
     if (msg.type === 'result') {
       const resolve = pending.get(msg.id);
       if (resolve) {
         pending.delete(msg.id);
-        resolve({ ok: msg.ok, data: msg.data, error: msg.error });
+        // errorKey is the worker's own failure; error comes from the kernel,
+        // already in the requested language.
+        resolve({ ok: msg.ok, data: msg.data, error: msg.errorKey ? t(msg.errorKey) : msg.error });
       }
     }
   }
@@ -224,7 +231,7 @@
     return new Promise((resolve) => {
       const id = ++sequence;
       pending.set(id, resolve);
-      worker.postMessage({ id, op, args });
+      worker.postMessage({ id, op, args, lang: window.NablaI18n.lang });
     });
   }
 
@@ -235,7 +242,7 @@
     pending.clear();
     if (worker) worker.terminate();
     state.ready = false;
-    el.bootStatus.textContent = 'Restarting the engine';
+    el.bootStatus.textContent = t('boot.restarting');
     el.bootBar.style.width = '10%';
     startWorker();
   }
@@ -278,7 +285,8 @@
   function renderChips() {
     el.chips.innerHTML = '';
     for (const name of OP_ORDER) {
-      const button = node('button', 'chip', OPS[name].chip);
+      const spec = OPS[name];
+      const button = node('button', 'chip', spec.chipKey ? t(spec.chipKey) : spec.chip);
       button.type = 'button';
       button.setAttribute('aria-pressed', String(name === state.op));
       button.addEventListener('click', () => setOp(name));
@@ -293,13 +301,13 @@
 
     for (const field of spec.fields) {
       const wrap = node('div', 'field');
-      const label = node('label', 'field__label', field.label);
+      const label = node('label', 'field__label', t(field.labelKey));
       wrap.appendChild(label);
 
       if (field.kind === 'toggle') {
         const group = node('div', 'field__toggle');
         for (const [value, text] of field.options) {
-          const button = node('button', null, text);
+          const button = node('button', null, text.includes('.') ? t(text) : text);
           button.type = 'button';
           button.setAttribute('aria-pressed', String(values[field.name] === value));
           button.addEventListener('click', () => {
@@ -370,7 +378,7 @@
 
       for (const [label, spec] of page.keys) {
         const config = typeof spec === 'string' ? { text: spec } : spec;
-        const key = node('button', 'key', label);
+        const key = node('button', 'key', config.i18n ? t(label) : label);
         key.type = 'button';
         key.tabIndex = -1;
         if (config.full) key.classList.add('key--full');
@@ -484,7 +492,7 @@
     state.keypadOpen = open;
     el.keypad.classList.toggle('keypad--closed', !open);
     el.kpToggle.innerHTML = open ? '&#9662;' : '&#9652;';
-    el.kpToggle.setAttribute('aria-label', open ? 'Hide keypad' : 'Show keypad');
+    el.kpToggle.setAttribute('aria-label', t(open ? 'keypad.hide' : 'keypad.show'));
     syncDockHeight();
   }
 
@@ -601,17 +609,17 @@
     el.go.dataset.busy = on ? 'true' : 'false';
     if (on) {
       el.go.innerHTML = '&middot;&middot;&middot;';
-      el.go.setAttribute('aria-label', 'Computing');
+      el.go.setAttribute('aria-label', t('entry.computing'));
       el.go.disabled = true;
       abortTimer = setTimeout(() => {
         el.go.disabled = false;
         el.go.innerHTML = '&#9632;';
-        el.go.setAttribute('aria-label', 'Stop');
+        el.go.setAttribute('aria-label', t('entry.stop'));
         el.go.dataset.abort = 'true';
       }, ABORT_AFTER);
     } else {
       el.go.innerHTML = '&#8594;';
-      el.go.setAttribute('aria-label', 'Compute');
+      el.go.setAttribute('aria-label', t('entry.compute'));
       delete el.go.dataset.abort;
       updateGo();
     }
@@ -624,9 +632,9 @@
 
   async function submit() {
     if (el.go.dataset.abort === 'true') {
-      restartWorker('Stopped.');
+      restartWorker(t('toast.stoppedShort'));
       setBusy(false);
-      toast('Stopped — engine restarting');
+      toast(t('toast.stopped'));
       return;
     }
     const source = el.input.value.trim();
@@ -656,12 +664,13 @@
   // --------------------------------------------------------------- cards --
 
   function buildCard(entry) {
-    const spec = OPS[entry.op] || { label: entry.op, meta: () => '' };
+    const spec = OPS[entry.op] || { labelKey: entry.op, meta: () => '' };
     const card = node('article', `card${entry.ok ? '' : ' card--error'}`);
     card.dataset.id = entry.id;
 
     const head = node('div', 'card__head');
-    head.appendChild(node('span', 'card__op', entry.ok ? spec.label : `${spec.label} — failed`));
+    const opName = t(spec.labelKey);
+    head.appendChild(node('span', 'card__op', entry.ok ? opName : t('card.failed', opName)));
     head.appendChild(node('span', 'card__meta', safeMeta(spec, entry.params)));
     head.appendChild(node('span', 'card__time', formatTime(entry.at)));
     card.appendChild(head);
@@ -669,7 +678,7 @@
     card.appendChild(node('div', 'card__source', entry.source));
 
     if (!entry.ok) {
-      card.appendChild(node('div', 'card__error', entry.error || 'Something went wrong.'));
+      card.appendChild(node('div', 'card__error', entry.error || t('card.genericError')));
       card.appendChild(buildActions(entry, ['edit']));
       return card;
     }
@@ -691,7 +700,7 @@
     if (entry.op === 'table') {
       card.appendChild(buildTable(entry));
       if (data.truncated) {
-        card.appendChild(node('p', 'card__note', 'Showing the first 400 rows.'));
+        card.appendChild(node('p', 'card__note', t('card.truncated')));
       }
       card.appendChild(buildActions(entry, ['copy', 'edit']));
       return card;
@@ -716,8 +725,7 @@
 
     if (data.note) card.appendChild(node('p', 'card__note', data.note));
     if (data.hidden_complex) {
-      card.appendChild(node('p', 'card__note',
-        `${data.hidden_complex} complex root(s) hidden — turn on “complex” to include them.`));
+      card.appendChild(node('p', 'card__note', t('card.hiddenComplex', data.hidden_complex)));
     }
 
     if (data.alternates && data.alternates.length) {
@@ -759,19 +767,19 @@
     };
 
     if (kinds.includes('copy')) {
-      make('copy', () => copy(plainTextOf(entry), 'Result copied'));
+      make(t('act.copy'), () => copy(plainTextOf(entry), t('toast.copied')));
     }
     if (kinds.includes('latex')) {
-      make('latex', () => copy(entry.data.latex || '', 'LaTeX copied'));
+      make(t('act.latex'), () => copy(entry.data.latex || '', t('toast.latexCopied')));
     }
     if (kinds.includes('reset')) {
-      make('reset view', () => {
+      make(t('act.resetView'), () => {
         const chart = charts.get(entry.id);
         if (chart && chart.resetZoom) chart.resetZoom();
       });
     }
     if (kinds.includes('edit')) {
-      make('reuse', () => {
+      make(t('act.reuse'), () => {
         state.params[entry.op] = { ...state.params[entry.op], ...entry.params };
         state.varTouched[entry.op] = true;
         setOp(entry.op);
@@ -780,7 +788,7 @@
         runPreview();
       });
     }
-    make('delete', () => removeEntry(entry.id), 'act act--danger');
+    make(t('act.delete'), () => removeEntry(entry.id), 'act act--danger');
     return wrap;
   }
 
@@ -843,7 +851,7 @@
     } catch (err) {
       const holder = canvas.closest('.chart');
       if (holder) {
-        holder.replaceChildren(node('p', 'card__note', 'Couldn’t draw this plot.'));
+        holder.replaceChildren(node('p', 'card__note', t('card.plotFailed')));
       }
     }
   }
@@ -989,9 +997,15 @@
     return String(Number(value.toPrecision(7)));
   }
 
+  /* Follow the app's language, not the browser's — someone reading the
+   * interface in Portuguese expects 30/08/2026, not 8/30/2026. */
+  function locale() {
+    return window.NablaI18n.lang === 'pt' ? 'pt-BR' : 'en-GB';
+  }
+
   function formatTime(stamp) {
     try {
-      return new Date(stamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return new Date(stamp).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
     } catch (err) {
       return '';
     }
@@ -1046,8 +1060,8 @@
     if (!state.entries.length) el.intro.hidden = false;
     save();
 
-    toast('Deleted', {
-      label: 'Undo',
+    toast(t('toast.deleted'), {
+      label: t('toast.undo'),
       run: () => {
         state.entries.splice(Math.min(index, state.entries.length), 0, removed);
         save();
@@ -1125,8 +1139,8 @@
     renderAll();
     try { localStorage.removeItem(HISTORY_KEY); } catch (err) { /* already gone */ }
 
-    toast('History cleared', {
-      label: 'Undo',
+    toast(t('toast.cleared'), {
+      label: t('toast.undo'),
       run: () => {
         state.entries = snapshot;
         save();
@@ -1139,22 +1153,22 @@
 
   function exportMarkdown() {
     if (!state.entries.length) {
-      toast('Nothing to export yet');
+      toast(t('toast.nothingToExport'));
       return;
     }
     const lines = [
-      '# Nabla — calculation history',
+      t('export.title'),
       '',
-      `_Exported ${new Date().toLocaleString()}_`,
+      t('export.exportedAt', new Date().toLocaleString(locale())),
       '',
     ];
 
     for (const entry of state.entries) {
       const spec = OPS[entry.op];
-      lines.push(`## ${spec.label} · ${new Date(entry.at).toLocaleString()}`, '');
-      lines.push(`**Input** \`${entry.source}\`  `);
+      lines.push(`## ${t(spec.labelKey)} · ${new Date(entry.at).toLocaleString(locale())}`, '');
+      lines.push(`${t('export.input')} \`${entry.source}\`  `);
       const meta = safeMeta(spec, entry.params);
-      if (meta) lines.push(`**Settings** ${meta}  `);
+      if (meta) lines.push(`${t('export.settings')} ${meta}  `);
       lines.push('');
 
       if (!entry.ok) {
@@ -1169,7 +1183,7 @@
         });
         lines.push('');
       } else if (entry.op === 'plot') {
-        lines.push(`_Plotted over x ∈ [${entry.params.x_min}, ${entry.params.x_max}]._`, '');
+        lines.push(t('export.plotted', entry.params.x_min, entry.params.x_max), '');
       } else {
         lines.push('$$', entry.data.latex, '$$', '');
         if (entry.data.text) lines.push('```', entry.data.text, '```', '');
@@ -1180,8 +1194,9 @@
       if ((entry.data.alternates || []).length) lines.push('');
     }
 
-    download('nabla-history.md', lines.join('\n'));
-    toast('Exported nabla-history.md');
+    const filename = t('export.filename');
+    download(filename, lines.join('\n'));
+    toast(t('toast.exported', filename));
   }
 
   function download(filename, text) {
@@ -1215,7 +1230,7 @@
       document.execCommand('copy');
       toast(message);
     } catch (err) {
-      toast('Copy failed');
+      toast(t('toast.copyFailed'));
     }
     area.remove();
   }
@@ -1246,6 +1261,44 @@
     toastTimer = setTimeout(hideToast, action ? 6000 : 1900);
   }
 
+  // ------------------------------------------------------------ language --
+
+  /* Fills every element carrying a data-i18n* attribute. The -html variant
+   * exists for the few strings with inline <code> markup; they are our own
+   * literals from i18n.js, never user input. */
+  function applyStaticStrings() {
+    document.querySelectorAll('[data-i18n]').forEach((node_) => {
+      node_.textContent = t(node_.dataset.i18n);
+    });
+    document.querySelectorAll('[data-i18n-html]').forEach((node_) => {
+      node_.innerHTML = t(node_.dataset.i18nHtml);
+    });
+    document.querySelectorAll('[data-i18n-title]').forEach((node_) => {
+      const text = t(node_.dataset.i18nTitle);
+      node_.title = text;
+      node_.setAttribute('aria-label', text);
+    });
+    el.input.setAttribute('aria-label', t('entry.placeholder'));
+    el.langBtn.textContent = window.NablaI18n.lang === 'pt' ? 'EN' : 'PT';
+    el.langBtn.title = t('topbar.lang');
+    document.title = 'Nabla';
+  }
+
+  function setLanguage(lang) {
+    window.NablaI18n.set(lang);
+    applyStaticStrings();
+    renderChips();
+    renderParams();
+    renderKeypad();
+    setKeypadOpen(state.keypadOpen);
+    applyTheme(document.documentElement.dataset.theme);
+    el.input.placeholder = OPS[state.op].placeholder;
+    // Past results keep the wording they were computed with; only new ones
+    // pick up the change. Re-render anyway so captions and buttons update.
+    renderAll();
+    if (el.input.value.trim()) schedulePreview();
+  }
+
   // --------------------------------------------------------------- theme --
 
   function readTheme() {
@@ -1260,7 +1313,7 @@
     document.documentElement.dataset.theme = theme;
     el.themeColor.setAttribute('content', theme === 'dark' ? '#0e1420' : '#f4f1ea');
     el.themeBtn.innerHTML = theme === 'dark' ? '&#9681;' : '&#9680;';
-    el.themeBtn.title = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
+    el.themeBtn.title = t(theme === 'dark' ? 'topbar.theme.toLight' : 'topbar.theme.toDark');
     restyleCharts();
   }
 
@@ -1298,6 +1351,7 @@
       if (localStorage.getItem(KEYBOARD_KEY) === 'native') state.keyboard = 'native';
     } catch (err) { /* private mode */ }
 
+    applyStaticStrings();
     renderChips();
     renderParams();
     renderKeypad();
@@ -1323,11 +1377,14 @@
     matchMedia('(max-width: 619px)').addEventListener('change', applyKeyboard);
 
     el.themeBtn.addEventListener('click', toggleTheme);
+    el.langBtn.addEventListener('click', () => {
+      setLanguage(window.NablaI18n.lang === 'pt' ? 'en' : 'pt');
+    });
     el.exportBtn.addEventListener('click', exportMarkdown);
 
     el.clearBtn.addEventListener('click', () => {
       if (!state.entries.length) {
-        toast('History is already empty');
+        toast(t('toast.alreadyEmpty'));
         return;
       }
       // No longer needs a confirm tap — clearHistory offers undo instead.
@@ -1343,7 +1400,7 @@
     window.addEventListener('orientationchange', () => setTimeout(syncViewport, 250));
 
     if (location.protocol === 'file:') {
-      bootFailed('Open Nabla over http:// — workers and modules are blocked on file://.');
+      bootFailed(t('boot.fileProtocol'));
       return;
     }
 

@@ -49,6 +49,7 @@
   <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
   <script defer crossorigin="anonymous"
     src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+  <script defer src="./src/i18n.js"></script>
   <script defer src="./src/app.js"></script>
 </head>
 
@@ -58,9 +59,9 @@
     <div class="boot__inner">
       <div class="boot__mark" aria-hidden="true">&#8711;</div>
       <h1 class="boot__name">Nabla</h1>
-      <p class="boot__status" id="bootStatus">Waking the engine</p>
+      <p class="boot__status" id="bootStatus" data-i18n="boot.waking">Waking the engine</p>
       <div class="boot__bar" role="progressbar" aria-label="Loading"><i id="bootBar"></i></div>
-      <p class="boot__note">
+      <p class="boot__note" data-i18n-html="boot.note">
         First run downloads Python&nbsp;+&nbsp;SymPy. After that it&rsquo;s cached on the device.
       </p>
     </div>
@@ -72,12 +73,10 @@
       <span class="brand__name">Nabla</span>
     </div>
     <div class="topbar__actions">
-      <button class="iconbtn" id="exportBtn" type="button" title="Export history as Markdown"
-        aria-label="Export history">&#8681;</button>
-      <button class="iconbtn" id="clearBtn" type="button" title="Clear history"
-        aria-label="Clear history">&#9003;</button>
-      <button class="iconbtn" id="themeBtn" type="button" title="Switch theme"
-        aria-label="Switch theme">&#9680;</button>
+      <button class="iconbtn" id="langBtn" type="button">PT</button>
+      <button class="iconbtn" id="exportBtn" type="button" data-i18n-title="topbar.export">&#8681;</button>
+      <button class="iconbtn" id="clearBtn" type="button" data-i18n-title="topbar.clear">&#9003;</button>
+      <button class="iconbtn" id="themeBtn" type="button">&#9680;</button>
     </div>
   </header>
 
@@ -94,34 +93,30 @@
 
   <main class="stream" id="stream" tabindex="-1">
     <section class="intro" id="intro">
-      <p class="intro__lede">The power of symbolic math, in the palm of your hand.</p>
+      <p class="intro__lede" data-i18n="intro.lede"></p>
       <ul class="intro__list">
-        <li><b>d/dx</b> derivatives to any order</li>
-        <li><b>&#8747;</b> indefinite and definite, <code>oo</code> allowed in bounds</li>
-        <li><b>lim</b> one&#8209; or two&#8209;sided</li>
-        <li><b>solve</b> type an equation and get its solutions.
-        <li><b>plot</b> comma&#8209;separate up to four functions</li>
+        <li><b>d/dx</b> <span data-i18n-html="intro.derivative"></span></li>
+        <li><b>&#8747;</b> <span data-i18n-html="intro.integral"></span></li>
+        <li><b>lim</b> <span data-i18n-html="intro.limit"></span></li>
+        <li><b data-i18n="chip.solve"></b> <span data-i18n-html="intro.solve"></span></li>
+        <li><b data-i18n="chip.plot"></b> <span data-i18n-html="intro.plot"></span></li>
       </ul>
-      <p class="intro__foot">
-        Constants: <code>pi</code>, <code>e</code>, <code>oo</code>. <br>
-        <code>ln</code> is the natural log, <code>log</code> is base&nbsp;10
-        (<code>log(x, 2)</code> for any other base).
-      </p>
+      <p class="intro__foot" data-i18n-html="intro.foot"></p>
     </section>
   </main>
 
-  <section class="keypad" id="keypad" hidden aria-label="Math keypad">
+  <section class="keypad" id="keypad" hidden data-i18n-title="keypad.label">
     <div class="keypad__bar">
       <div class="keypad__tabs" id="keypadTabs" role="tablist" aria-label="Keypad page"></div>
-      <button class="kbar" id="kpBack" type="button" aria-label="Backspace">&#9003;</button>
-      <button class="kbar" id="kpToggle" type="button" aria-label="Hide keypad">&#9662;</button>
+      <button class="kbar" id="kpBack" type="button" data-i18n-title="keypad.backspace">&#9003;</button>
+      <button class="kbar" id="kpToggle" type="button">&#9662;</button>
     </div>
     <div class="keypad__pages" id="keypadPages"></div>
   </section>
 
   <div class="kswitch" id="kswitch" hidden>
     <button class="kswitch__btn" id="kswitchBtn" type="button">
-      <span aria-hidden="true">&#8711;</span> Math keypad
+      <span aria-hidden="true">&#8711;</span> <span data-i18n="keypad.switch">Math keypad</span>
     </button>
   </div>
 
