@@ -6,7 +6,7 @@
  * Pyodide + SymPy payload is ~25 MB and otherwise re-downloads every time.
  */
 
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL_CACHE = `nabla-shell-${VERSION}`;
 const VENDOR_CACHE = `nabla-vendor-${VERSION}`;
 const KEEP = new Set([SHELL_CACHE, VENDOR_CACHE]);
@@ -29,17 +29,27 @@ const SHELL = [
 
 const VENDOR_HOSTS = new Set(['cdn.jsdelivr.net']);
 
+/* worker.js reaches this through importScripts(), which issues a no-cors
+ * request whose opaque response Cache.put() will not store. Precaching it
+ * here as an ordinary CORS fetch means the cache holds a usable copy that
+ * the importScripts request can still be answered from. */
+const VENDOR_PRECACHE = [
+  'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js',
+];
+
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
-    const cache = await caches.open(SHELL_CACHE);
+    const shell = await caches.open(SHELL_CACHE);
+    const vendor = await caches.open(VENDOR_CACHE);
     // addAll is atomic — one 404 would throw away the whole install.
-    await Promise.all(SHELL.map(async (url) => {
-      try {
-        await cache.add(new Request(url, { cache: 'reload' }));
-      } catch (err) {
-        /* a missing optional asset shouldn't block activation */
-      }
-    }));
+    const warm = (cache, url) => cache
+      .add(new Request(url, { cache: 'reload' }))
+      .catch(() => { /* a missing optional asset shouldn't block activation */ });
+
+    await Promise.all([
+      ...SHELL.map((url) => warm(shell, url)),
+      ...VENDOR_PRECACHE.map((url) => warm(vendor, url)),
+    ]);
     await self.skipWaiting();
   })());
 });
