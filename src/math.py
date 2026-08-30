@@ -172,6 +172,39 @@ MESSAGES = {
         "combined fraction": "fração única",
         "decimal": "decimal",
         "solve for": "resolver para",
+        # worked-step labels
+        "Constant": "Constante",
+        "Constant multiple": "Múltiplo constante",
+        "Power rule": "Regra da potência",
+        "Sum rule": "Regra da soma",
+        "Product rule": "Regra do produto",
+        "Quotient rule": "Regra do quociente",
+        "Chain rule": "Regra da cadeia",
+        "Exponential rule": "Regra da exponencial",
+        "Standard derivative": "Derivada imediata",
+        "The variable itself": "A própria variável",
+        "Differentiate": "Derivar",
+        "Derivative number %d": "Derivada número %d",
+        "Substitution": "Substituição",
+        "Integration by parts": "Integração por partes",
+        "Integration by parts (cyclic)": "Integração por partes (cíclica)",
+        "Exponential": "Exponencial",
+        "Reciprocal": "Recíproca",
+        "Arctangent form": "Forma arco-tangente",
+        "Arcsine form": "Forma arco-seno",
+        "Inverse hyperbolic form": "Forma hiperbólica inversa",
+        "Rewrite": "Reescrever",
+        "Split into cases": "Separar em casos",
+        "Trigonometric integral": "Integral trigonométrica",
+        "Integral of sine": "Integral do seno",
+        "Integral of cosine": "Integral do cosseno",
+        "Partial fractions": "Frações parciais",
+        "Trigonometric substitution": "Substituição trigonométrica",
+        "Quadratic under a root": "Quadrática sob a raiz",
+        "Nested power": "Potência aninhada",
+        "Heaviside step": "Degrau de Heaviside",
+        "find v": "achar v",
+        "remaining integral": "integral restante",
     },
 }
 
@@ -351,6 +384,287 @@ def _finite_list(values):
 
 
 # --------------------------------------------------------------------------
+# worked steps
+# --------------------------------------------------------------------------
+
+MAX_STEPS = 40
+
+# SymPy names its integration rules by class; these read better than the
+# auto-prettified class name. Anything missing falls back to that.
+_RULE_LABELS = {
+    "ConstantRule": "Constant",
+    "ConstantTimesRule": "Constant multiple",
+    "PowerRule": "Power rule",
+    "AddRule": "Sum rule",
+    "URule": "Substitution",
+    "USubstitutionRule": "Substitution",
+    "PartsRule": "Integration by parts",
+    "CyclicPartsRule": "Integration by parts (cyclic)",
+    "ExpRule": "Exponential",
+    "ReciprocalRule": "Reciprocal",
+    "ArctanRule": "Arctangent form",
+    "ArcsinRule": "Arcsine form",
+    "ArccoshRule": "Inverse hyperbolic form",
+    "RewriteRule": "Rewrite",
+    "PiecewiseRule": "Split into cases",
+    "TrigRule": "Trigonometric integral",
+    "SinRule": "Integral of sine",
+    "CosRule": "Integral of cosine",
+    "SecTanRule": "Trigonometric integral",
+    "CscCotRule": "Trigonometric integral",
+    "PartialFractionRule": "Partial fractions",
+    "HeavisideRule": "Heaviside step",
+    "TrigSubstitutionRule": "Trigonometric substitution",
+    "SqrtQuadraticRule": "Quadratic under a root",
+    "NestedPowRule": "Nested power",
+}
+
+_CAMEL_RE = re.compile(r"(?<!^)(?=[A-Z])")
+
+
+def _rule_label(name):
+    known = _RULE_LABELS.get(name)
+    if known:
+        return known
+    stem = name[:-4] if name.endswith("Rule") else name
+    return _CAMEL_RE.sub(" ", stem).lower().capitalize()
+
+
+def _step(out, depth, rule, latex, detail=None):
+    out.append({
+        "rule": _t(rule),
+        "latex": latex,
+        "detail": detail,
+        "depth": min(depth, 4),
+    })
+
+
+def _child_rules(rule):
+    """Any field holding a rule, or a list of them, in field order."""
+    import dataclasses
+
+    found = []
+    if not dataclasses.is_dataclass(rule):
+        return found
+    for field in dataclasses.fields(rule):
+        value = getattr(rule, field.name, None)
+        candidates = value if isinstance(value, (list, tuple)) else [value]
+        for item in candidates:
+            if dataclasses.is_dataclass(item) and type(item).__name__.endswith("Rule"):
+                found.append(item)
+    return found
+
+
+# SymPy reuses one dummy for every substitution, so a nested one reads
+# "u = u". Give each depth its own letter instead.
+_SUB_NAMES = ("u", "w", "p", "q", "r")
+
+
+def _walk_integral(rule, var, depth, out, note=None, renames=None, subs_depth=0):
+    if rule is None or len(out) >= MAX_STEPS:
+        return
+    renames = renames or {}
+
+    def shown(expr):
+        return expr.subs(renames) if (renames and expr is not None) else expr
+
+    name = type(rule).__name__
+
+    if name == "DontKnowRule":
+        return
+    if name == "AlternativeRule":
+        # SymPy orders alternatives best-first; showing every branch would
+        # read as indecision rather than as a method.
+        alternatives = getattr(rule, "alternatives", None) or []
+        if alternatives:
+            _walk_integral(alternatives[0], var, depth, out, note, renames, subs_depth)
+        return
+
+    integrand = getattr(rule, "integrand", None)
+    latex = (
+        _latex(sp.Integral(shown(integrand), shown(var)))
+        if integrand is not None else ""
+    )
+
+    detail = None
+    child_renames = renames
+    inner_var = var
+
+    if name in ("URule", "USubstitutionRule"):
+        u_func = getattr(rule, "u_func", None)
+        u_var = getattr(rule, "u_var", None)
+        letter = _SUB_NAMES[min(subs_depth, len(_SUB_NAMES) - 1)]
+        if u_func is not None:
+            detail = "%s = %s" % (letter, _latex(shown(u_func)))
+        if u_var is not None:
+            child_renames = dict(renames)
+            child_renames[u_var] = sp.Symbol(letter)
+            inner_var = u_var
+    elif name in ("PartsRule", "CyclicPartsRule"):
+        u, dv = getattr(rule, "u", None), getattr(rule, "dv", None)
+        if u is not None and dv is not None:
+            detail = r"u = %s,\quad dv = %s\,d%s" % (
+                _latex(shown(u)), _latex(shown(dv)), _latex(shown(var)),
+            )
+    elif name == "RewriteRule":
+        rewritten = getattr(rule, "rewritten", None)
+        if rewritten is not None:
+            detail = r"\to %s" % _latex(shown(rewritten))
+
+    _step(out, depth, _rule_label(name), latex, detail or note)
+
+    # After a substitution the sub-integral is in u, so its differential must
+    # be du — rendering it as dx would be plainly wrong on the page.
+    if name in ("URule", "USubstitutionRule"):
+        for child in _child_rules(rule):
+            _walk_integral(child, inner_var, depth + 1, out,
+                           None, child_renames, subs_depth + 1)
+        return
+
+    # Parts produces two sub-integrals with quite different jobs; unlabelled
+    # they look like the same step done twice.
+    if name in ("PartsRule", "CyclicPartsRule"):
+        pairs = (
+            (getattr(rule, "v_step", None), r"\text{%s}" % _t("find v")),
+            (getattr(rule, "second_step", None), r"\text{%s}" % _t("remaining integral")),
+        )
+        for child, label in pairs:
+            if child is not None:
+                _walk_integral(child, var, depth + 1, out, label, renames, subs_depth)
+        return
+
+    for child in _child_rules(rule):
+        _walk_integral(child, var, depth + 1, out, None, renames, subs_depth)
+
+
+def _integral_steps(expr, var):
+    try:
+        from sympy.integrals.manualintegrate import integral_steps
+    except Exception:
+        return []
+    try:
+        tree = integral_steps(expr, var)
+    except Exception:
+        return []
+    out = []
+    _walk_integral(tree, var, 0, out)
+    return out[:MAX_STEPS]
+
+
+def _diff_step(out, depth, rule, expr, var, detail=None):
+    _step(
+        out,
+        depth,
+        rule,
+        r"%s = %s" % (
+            _latex(sp.Derivative(expr, var)),
+            _latex(sp.diff(expr, var)),
+        ),
+        detail,
+    )
+
+
+def _walk_derivative(expr, var, depth, out):
+    """SymPy has no step machinery for diff, but the rules are mechanical."""
+    if len(out) >= MAX_STEPS or depth > 4:
+        return
+
+    if not expr.has(var):
+        _diff_step(out, depth, "Constant", expr, var)
+        return
+    if expr == var:
+        _diff_step(out, depth, "The variable itself", expr, var)
+        return
+
+    if isinstance(expr, sp.Add):
+        _diff_step(out, depth, "Sum rule", expr, var,
+                   r"\text{differentiate each term}")
+        for term in expr.args:
+            if term.has(var):
+                _walk_derivative(term, var, depth + 1, out)
+        return
+
+    if isinstance(expr, sp.Mul):
+        coeff, rest = expr.as_coeff_Mul()
+        if coeff != 1 and rest.has(var):
+            _diff_step(out, depth, "Constant multiple", expr, var,
+                       r"\text{pull out } %s" % _latex(coeff))
+            _walk_derivative(rest, var, depth + 1, out)
+            return
+
+        numer, denom = expr.as_numer_denom()
+        if denom != 1 and denom.has(var):
+            _diff_step(out, depth, "Quotient rule", expr, var,
+                       r"\left(\frac{f}{g}\right)' = \frac{f'g - fg'}{g^{2}}")
+            for part in (numer, denom):
+                if part.has(var):
+                    _walk_derivative(part, var, depth + 1, out)
+            return
+
+        factors = [f for f in expr.args if f.has(var)]
+        if len(factors) > 1:
+            _diff_step(out, depth, "Product rule", expr, var,
+                       r"(fg)' = f'g + fg'")
+            for factor in factors:
+                _walk_derivative(factor, var, depth + 1, out)
+            return
+        if factors:
+            _walk_derivative(factors[0], var, depth + 1, out)
+            return
+
+    if isinstance(expr, sp.Pow):
+        base, exponent = expr.args
+        if not exponent.has(var):
+            _diff_step(out, depth, "Power rule", expr, var,
+                       r"\frac{d}{dx}u^{n} = n\,u^{n-1}u'")
+            if base != var:
+                _walk_derivative(base, var, depth + 1, out)
+            return
+        _diff_step(out, depth, "Exponential rule", expr, var,
+                   r"\frac{d}{dx}a^{u} = a^{u}\ln a \cdot u'")
+        return
+
+    if isinstance(expr, sp.Function) and len(expr.args) == 1:
+        inner = expr.args[0]
+        label = "Chain rule" if inner != var else "Standard derivative"
+        detail = r"\frac{d}{dx}f(u) = f'(u)\,u'" if inner != var else None
+        _diff_step(out, depth, label, expr, var, detail)
+        if inner != var:
+            _walk_derivative(inner, var, depth + 1, out)
+        return
+
+    _diff_step(out, depth, "Differentiate", expr, var)
+
+
+def _derivative_steps(expr, var, order):
+    out = []
+    try:
+        current = expr
+        for level in range(order):
+            if len(out) >= MAX_STEPS:
+                break
+            if order > 1:
+                _step(
+                    out, 0,
+                    # Translated first, then interpolated — _t on the result
+                    # is a harmless no-op.
+                    _t("Derivative number %d") % (level + 1),
+                    r"%s = %s" % (
+                        _latex(sp.Derivative(current, var)),
+                        _latex(sp.diff(current, var)),
+                    ),
+                    None,
+                )
+                _walk_derivative(current, var, 1, out)
+            else:
+                _walk_derivative(current, var, 0, out)
+            current = sp.diff(current, var)
+    except Exception:
+        return out[:MAX_STEPS]
+    return out[:MAX_STEPS]
+
+
+# --------------------------------------------------------------------------
 # operations
 # --------------------------------------------------------------------------
 
@@ -398,6 +712,7 @@ def op_derivative(source="", variable="x", order=1):
     return {
         "statement": _latex(sp.Derivative(expr, (var, order))),
         "alternates": alternates,
+        "steps": _derivative_steps(expr, var, order),
         **_fmt(result),
     }
 
@@ -417,6 +732,7 @@ def op_integral(source="", variable="x", lower=None, upper=None):
             "latex": _latex(result + constant),
             "text": _text(result) + " + C",
             "alternates": [],
+            "steps": _integral_steps(expr, var),
         }
 
     low, high = _parse_point(lower), _parse_point(upper)
@@ -445,7 +761,12 @@ def op_integral(source="", variable="x", lower=None, upper=None):
     if decimal and decimal != _text(simplified):
         alternates.append({"label": "decimal", "latex": decimal, "text": decimal})
 
-    return {"statement": statement, "alternates": alternates, **_fmt(result)}
+    return {
+        "statement": statement,
+        "alternates": alternates,
+        "steps": _integral_steps(expr, var),
+        **_fmt(result),
+    }
 
 
 def op_limit(source="", variable="x", point="0", direction="+-"):

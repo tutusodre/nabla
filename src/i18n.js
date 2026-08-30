@@ -82,6 +82,8 @@
       'act.reuse': 'reuse',
       'act.delete': 'delete',
       'act.resetView': 'reset view',
+      'act.steps': 'steps',
+      'export.steps': '**Steps**',
 
       'card.failed': '%1 — failed',
       'card.genericError': 'Something went wrong.',
@@ -194,6 +196,8 @@
       'act.reuse': 'reusar',
       'act.delete': 'excluir',
       'act.resetView': 'redefinir',
+      'act.steps': 'passos',
+      'export.steps': '**Passos**',
 
       'card.failed': '%1 — falhou',
       'card.genericError': 'Algo deu errado.',

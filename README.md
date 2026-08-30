@@ -90,6 +90,24 @@ asymptotes are gaps rather than vertical strokes. The y-range comes from the 1st
 and 99th percentiles, so one near-asymptote value cannot flatten the whole
 curve.
 
+**Worked steps** are available for derivatives and integrals, collapsed behind
+a `steps` toggle on the card, and included in the Markdown export.
+
+Integrals use SymPy's own `integral_steps`, which returns a rule tree mirroring
+how a person would integrate — substitution, parts, rewrites, partial fractions
+— including the chosen `u` and `dv`. Two things the raw tree gets wrong on the
+page and this code fixes: a sub-integral after a substitution is in `u`, so its
+differential must be rendered `du` and not `dx`; and SymPy reuses one dummy
+symbol at every nesting level, so a nested substitution reads `u = u` unless
+each depth is given its own letter.
+
+Derivatives have no equivalent in SymPy, so `_walk_derivative` recurses over the
+expression tree emitting the power, product, quotient, chain and constant-
+multiple rules. Limits and `simplify` deliberately have no steps: SymPy's limit
+algorithm (Gruntz) has no human-readable form, and `simplify` is a heuristic
+search rather than a derivation. Inventing plausible-looking steps for either
+would be worse than showing none.
+
 **Storage.** History lives in `localStorage`, capped at 60 entries. Plot data is
 downsampled to 220 points before writing; on a quota error the oldest quarter is
 shed and the write retried.

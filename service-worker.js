@@ -6,7 +6,7 @@
  * Pyodide + SymPy payload is ~25 MB and otherwise re-downloads every time.
  */
 
-const VERSION = 'v4';
+const VERSION = 'v5';
 const SHELL_CACHE = `nabla-shell-${VERSION}`;
 const VENDOR_CACHE = `nabla-vendor-${VERSION}`;
 const KEEP = new Set([SHELL_CACHE, VENDOR_CACHE]);

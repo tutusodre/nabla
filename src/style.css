@@ -454,6 +454,50 @@ code {
 .act--danger { margin-left: auto; }
 .act--danger:hover { color: var(--error); border-color: var(--error); }
 
+/* Worked steps. Nesting is shown by an indented rule rather than numbering,
+ * because the derivation is a tree, not a list. */
+.steps {
+  margin-top: 14px;
+  padding-top: 4px;
+  border-top: var(--rule-w) dotted var(--rule);
+}
+.steps[hidden] { display: none; }
+
+.step {
+  margin-left: calc(var(--d, 0) * 13px);
+  padding: 9px 0 9px 11px;
+  border-left: 2px solid var(--rule);
+}
+.step:first-child { padding-top: 12px; }
+
+.step__rule {
+  display: block;
+  font-family: var(--serif);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 5px;
+}
+.step__math {
+  font-size: 14.5px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-strong) transparent;
+}
+.step__detail {
+  margin-top: 5px;
+  font-size: 12.5px;
+  color: var(--ink-faint);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-strong) transparent;
+}
+
+.act--on { color: var(--accent); border-color: var(--accent); }
+
 .card--error .card__op { color: var(--error); }
 .card__error {
   background: var(--error-wash);

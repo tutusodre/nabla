@@ -741,8 +741,31 @@
       card.appendChild(alts);
     }
 
-    card.appendChild(buildActions(entry, ['copy', 'latex', 'edit']));
+    card.appendChild(buildActions(entry, ['copy', 'latex', 'steps', 'edit']));
+    if (data.steps && data.steps.length) card.appendChild(buildSteps(data.steps));
     return card;
+  }
+
+  /* A worked derivation, collapsed by default — it can run to dozens of
+   * lines and the scrollback is meant to stay skimmable. */
+  function buildSteps(steps) {
+    const wrap = node('section', 'steps');
+    wrap.hidden = true;
+    for (const step of steps) {
+      const row = node('div', 'step');
+      row.style.setProperty('--d', String(step.depth || 0));
+      row.appendChild(node('span', 'step__rule', step.rule));
+      const math = node('div', 'step__math');
+      tex(math, step.latex, false);
+      row.appendChild(math);
+      if (step.detail) {
+        const detail = node('div', 'step__detail');
+        tex(detail, step.detail, false);
+        row.appendChild(detail);
+      }
+      wrap.appendChild(row);
+    }
+    return wrap;
   }
 
   function texVar(name) {
@@ -776,6 +799,15 @@
       make(t('act.resetView'), () => {
         const chart = charts.get(entry.id);
         if (chart && chart.resetZoom) chart.resetZoom();
+      });
+    }
+    if (kinds.includes('steps') && entry.ok && (entry.data.steps || []).length) {
+      make(t('act.steps'), (event) => {
+        const button = event.currentTarget;
+        const panel = button.closest('.card').querySelector('.steps');
+        panel.hidden = !panel.hidden;
+        button.setAttribute('aria-expanded', String(!panel.hidden));
+        button.classList.toggle('act--on', !panel.hidden);
       });
     }
     if (kinds.includes('edit')) {
@@ -1187,6 +1219,14 @@
       } else {
         lines.push('$$', entry.data.latex, '$$', '');
         if (entry.data.text) lines.push('```', entry.data.text, '```', '');
+      }
+      if ((entry.data.steps || []).length) {
+        lines.push(t('export.steps'), '');
+        for (const step of entry.data.steps) {
+          lines.push(`${'  '.repeat(step.depth || 0)}- _${step.rule}_ — $${step.latex}$`
+            + (step.detail ? ` &nbsp; $${step.detail}$` : ''));
+        }
+        lines.push('');
       }
       for (const alternate of entry.data.alternates || []) {
         lines.push(`- _${alternate.label}_: $${alternate.latex}$`);
