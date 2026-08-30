@@ -1,126 +1,132 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
-<title>Nabla</title>
-<meta name="description" content="Symbolic math and plots, typeset properly. Runs entirely in your browser.">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <title>Nabla</title>
+  <meta name="description" content="Symbolic math and plots, typeset properly. Runs entirely in your browser.">
 
-<meta name="theme-color" content="#f4f1ea" id="themeColor">
-<meta name="color-scheme" content="light dark">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Nabla">
-<meta name="format-detection" content="telephone=no">
+  <meta name="theme-color" content="#f4f1ea" id="themeColor">
+  <meta name="color-scheme" content="light dark">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Nabla">
+  <meta name="format-detection" content="telephone=no">
 
-<script>
-  /* Set the theme before first paint so there's no flash of the wrong one. */
-  (function () {
-    var t;
-    try { t = localStorage.getItem('nabla.theme.v1'); } catch (e) { t = null; }
-    if (t !== 'light' && t !== 'dark') {
-      t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    }
-    document.documentElement.dataset.theme = t;
-    document.documentElement.style.setProperty('--app-height',
-      (window.visualViewport ? window.visualViewport.height : window.innerHeight) + 'px');
-  })();
-</script>
+  <script>
+    /* Set the theme before first paint so there's no flash of the wrong one. */
+    (function () {
+      var t;
+      try { t = localStorage.getItem('nabla.theme.v1'); } catch (e) { t = null; }
+      if (t !== 'light' && t !== 'dark') {
+        t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.dataset.theme = t;
+      document.documentElement.style.setProperty('--app-height',
+        (window.visualViewport ? window.visualViewport.height : window.innerHeight) + 'px');
+    })();
+  </script>
 
-<link rel="manifest" href="./manifest.json">
-<link rel="icon" href="./icons/nabla.svg" type="image/svg+xml">
-<link rel="icon" href="./icons/icon-32.png" sizes="32x32" type="image/png">
-<link rel="apple-touch-icon" href="./icons/icon-180.png">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" href="./icons/nabla.svg" type="image/svg+xml">
+  <link rel="icon" href="./icons/icon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="./icons/icon-180.png">
 
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
-      integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous">
-<link rel="stylesheet" href="./src/style.css">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
+    integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous">
+  <link rel="stylesheet" href="./src/style.css">
 
-<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"
-        integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"></script>
-<!-- crossorigin matters beyond CORS: without it these are no-cors requests and
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"
+    integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg"
+    crossorigin="anonymous"></script>
+  <!-- crossorigin matters beyond CORS: without it these are no-cors requests and
      the responses come back opaque, which Cache.put() refuses to store — so
      they would never be available offline. -->
-<script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js"></script>
-<script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
-<script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-<script defer src="./src/app.js"></script>
+  <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js"></script>
+  <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+  <script defer crossorigin="anonymous"
+    src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+  <script defer src="./src/app.js"></script>
 </head>
+
 <body>
 
-<div class="boot" id="boot">
-  <div class="boot__inner">
-    <div class="boot__mark" aria-hidden="true">&#8711;</div>
-    <h1 class="boot__name">Nabla</h1>
-    <p class="boot__status" id="bootStatus">Waking the engine</p>
-    <div class="boot__bar" role="progressbar" aria-label="Loading"><i id="bootBar"></i></div>
-    <p class="boot__note">
-      First run downloads Python&nbsp;+&nbsp;SymPy. After that it&rsquo;s cached on the device.
-    </p>
+  <div class="boot" id="boot">
+    <div class="boot__inner">
+      <div class="boot__mark" aria-hidden="true">&#8711;</div>
+      <h1 class="boot__name">Nabla</h1>
+      <p class="boot__status" id="bootStatus">Waking the engine</p>
+      <div class="boot__bar" role="progressbar" aria-label="Loading"><i id="bootBar"></i></div>
+      <p class="boot__note">
+        First run downloads Python&nbsp;+&nbsp;SymPy. After that it&rsquo;s cached on the device.
+      </p>
+    </div>
   </div>
-</div>
 
-<header class="topbar">
-  <div class="brand">
-    <span class="brand__mark" aria-hidden="true">&#8711;</span>
-    <span class="brand__name">Nabla</span>
-  </div>
-  <div class="topbar__actions">
-    <button class="iconbtn" id="exportBtn" type="button" title="Export history as Markdown" aria-label="Export history">&#8681;</button>
-    <button class="iconbtn" id="clearBtn" type="button" title="Clear history" aria-label="Clear history">&#9003;</button>
-    <button class="iconbtn" id="themeBtn" type="button" title="Switch theme" aria-label="Switch theme">&#9680;</button>
-  </div>
-</header>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand__mark" aria-hidden="true">&#8711;</span>
+      <span class="brand__name">Nabla</span>
+    </div>
+    <div class="topbar__actions">
+      <button class="iconbtn" id="exportBtn" type="button" title="Export history as Markdown"
+        aria-label="Export history">&#8681;</button>
+      <button class="iconbtn" id="clearBtn" type="button" title="Clear history"
+        aria-label="Clear history">&#9003;</button>
+      <button class="iconbtn" id="themeBtn" type="button" title="Switch theme"
+        aria-label="Switch theme">&#9680;</button>
+    </div>
+  </header>
 
-<footer class="composer" id="composer">
-  <nav class="chips" id="chips" aria-label="Operation"></nav>
-  <div class="params" id="params"></div>
-  <form class="entry" id="form" autocomplete="off">
-    <input class="entry__input" id="input" type="text" inputmode="text"
-           autocapitalize="off" autocorrect="off" spellcheck="false"
-           placeholder="sin(x)^2" aria-label="Expression">
-    <button class="entry__go" id="go" type="submit" aria-label="Compute">&#8594;</button>
-  </form>
-  <div class="preview" id="preview" aria-live="polite"></div>
-</footer>
+  <footer class="composer" id="composer">
+    <nav class="chips" id="chips" aria-label="Operation"></nav>
+    <div class="params" id="params"></div>
+    <form class="entry" id="form" autocomplete="off">
+      <input class="entry__input" id="input" type="text" inputmode="text" autocapitalize="off" autocorrect="off"
+        spellcheck="false" placeholder="sin(x)^2" aria-label="Expression">
+      <button class="entry__go" id="go" type="submit" aria-label="Compute">&#8594;</button>
+    </form>
+    <div class="preview" id="preview" aria-live="polite"></div>
+  </footer>
 
-<main class="stream" id="stream" tabindex="-1">
-  <section class="intro" id="intro">
-    <p class="intro__lede">Symbolic math, typeset properly. Nothing leaves the device.</p>
-    <ul class="intro__list">
-      <li><b>d/dx</b> derivatives to any order</li>
-      <li><b>&#8747;</b> indefinite and definite, <code>oo</code> allowed in bounds</li>
-      <li><b>lim</b> one&#8209; or two&#8209;sided</li>
-      <li><b>solve</b> type <code>x^2 = 4</code> or just <code>x^2 - 4</code></li>
-      <li><b>plot</b> comma&#8209;separate up to four functions</li>
-    </ul>
-    <p class="intro__foot">
-      Type loosely &mdash; <code>2x</code>, <code>x^2</code>, <code>sin x</code> all parse.
-      Constants: <code>pi</code>, <code>e</code>, <code>oo</code>.
-      <code>ln</code> is the natural log, <code>log</code> is base&nbsp;10
-      (<code>log(x, 2)</code> for any other base).
-    </p>
+  <main class="stream" id="stream" tabindex="-1">
+    <section class="intro" id="intro">
+      <p class="intro__lede">The power of symbolic math, in the palm of your hand.</p>
+      <ul class="intro__list">
+        <li><b>d/dx</b> derivatives to any order</li>
+        <li><b>&#8747;</b> indefinite and definite, <code>oo</code> allowed in bounds</li>
+        <li><b>lim</b> one&#8209; or two&#8209;sided</li>
+        <li><b>solve</b> type an equation and get its solutions.
+        <li><b>plot</b> comma&#8209;separate up to four functions</li>
+      </ul>
+      <p class="intro__foot">
+        Constants: <code>pi</code>, <code>e</code>, <code>oo</code>. <br>
+        <code>ln</code> is the natural log, <code>log</code> is base&nbsp;10
+        (<code>log(x, 2)</code> for any other base).
+      </p>
+    </section>
+  </main>
+
+  <section class="keypad" id="keypad" hidden aria-label="Math keypad">
+    <div class="keypad__bar">
+      <div class="keypad__tabs" id="keypadTabs" role="tablist" aria-label="Keypad page"></div>
+      <button class="kbar" id="kpBack" type="button" aria-label="Backspace">&#9003;</button>
+      <button class="kbar" id="kpToggle" type="button" aria-label="Hide keypad">&#9662;</button>
+    </div>
+    <div class="keypad__pages" id="keypadPages"></div>
   </section>
-</main>
 
-<section class="keypad" id="keypad" hidden aria-label="Math keypad">
-  <div class="keypad__bar">
-    <div class="keypad__tabs" id="keypadTabs" role="tablist" aria-label="Keypad page"></div>
-    <button class="kbar" id="kpBack" type="button" aria-label="Backspace">&#9003;</button>
-    <button class="kbar" id="kpToggle" type="button" aria-label="Hide keypad">&#9662;</button>
+  <div class="kswitch" id="kswitch" hidden>
+    <button class="kswitch__btn" id="kswitchBtn" type="button">
+      <span aria-hidden="true">&#8711;</span> Math keypad
+    </button>
   </div>
-  <div class="keypad__pages" id="keypadPages"></div>
-</section>
 
-<div class="kswitch" id="kswitch" hidden>
-  <button class="kswitch__btn" id="kswitchBtn" type="button">
-    <span aria-hidden="true">&#8711;</span> Math keypad
-  </button>
-</div>
-
-<div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 </body>
+
 </html>
