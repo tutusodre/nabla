@@ -611,6 +611,7 @@ code {
   min-width: 0;
 }
 .field__input--narrow { width: 3.4em; }
+.field__input--var { width: 5.4em; }
 
 .field input[type="checkbox"] {
   appearance: none;
@@ -662,31 +663,6 @@ code {
 }
 .field__toggle button[aria-pressed="true"] { background: var(--accent); color: var(--paper); }
 
-.symbols {
-  display: none;
-  gap: 5px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding-bottom: 8px;
-}
-.symbols::-webkit-scrollbar { display: none; }
-.composer:focus-within .symbols { display: flex; }
-
-.sym {
-  appearance: none;
-  flex: 0 0 auto;
-  min-width: 38px;
-  min-height: 34px;
-  background: var(--sunk);
-  border: 0;
-  border-radius: var(--radius);
-  color: var(--ink-soft);
-  font-family: var(--serif);
-  font-size: 15px;
-  cursor: pointer;
-}
-.sym:active { background: var(--accent); color: var(--paper); }
-
 .entry { display: flex; gap: 8px; align-items: stretch; }
 
 .entry__input {
@@ -725,12 +701,127 @@ code {
   color: var(--accent);
 }
 
+/* --------------------------------------------------------------- keypad -- */
+
+/* Replaces the system keyboard, so it sits where that keyboard would: docked
+ * to the bottom, thumb-reachable, while the input stays up top. */
+.keypad {
+  flex: 0 0 auto;
+  background: var(--paper);
+  border-top: var(--rule-w) solid var(--rule-strong);
+  box-shadow: 0 -3px 0 -2px var(--rule);
+  padding-bottom: var(--safe-b);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.keypad[hidden] { display: none; }
+
+.keypad__bar {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 0 var(--gap);
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+.keypad__tabs { display: flex; gap: 4px; flex: 1 1 auto; min-width: 0; }
+
+.ktab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--ink-faint);
+  font-family: var(--serif);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  padding: 10px 14px;
+  min-height: 40px;
+  cursor: pointer;
+}
+.ktab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+
+.kbar {
+  appearance: none;
+  background: none;
+  border: 0;
+  color: var(--ink-faint);
+  width: 44px;
+  min-height: 40px;
+  font-size: 15px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.kbar:active { color: var(--ink); }
+
+.keypad__pages { padding: 8px var(--gap) 10px; }
+.keypad--closed .keypad__pages { display: none; }
+
+.kgrid {
+  display: grid;
+  grid-template-columns: repeat(var(--cols), 1fr);
+  gap: 6px;
+}
+.kgrid[hidden] { display: none; }
+
+.key {
+  appearance: none;
+  background: var(--sunk);
+  border: var(--rule-w) solid transparent;
+  border-radius: var(--radius);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 20px;
+  line-height: 1;
+  min-height: 46px;
+  padding: 4px;
+  cursor: pointer;
+  transition: background 0.08s, color 0.08s;
+  touch-action: manipulation;
+}
+.key:active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--paper);
+}
+.key--word { font-size: 14px; }
+.key--full { grid-column: 1 / -1; font-size: 12px; letter-spacing: 0.1em; color: var(--ink-faint); }
+.key--go { background: var(--accent); color: var(--paper); }
+.key--go:active { background: var(--accent-soft); }
+
+/* Bar shown instead of the keypad once the system keyboard is chosen. */
+.kswitch {
+  flex: 0 0 auto;
+  padding: 8px var(--gap) calc(8px + var(--safe-b));
+  border-top: var(--rule-w) solid var(--rule);
+  background: var(--paper);
+  display: flex;
+  justify-content: center;
+}
+.kswitch[hidden] { display: none; }
+
+.kswitch__btn {
+  appearance: none;
+  background: var(--sunk);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  font-family: var(--serif);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  padding: 9px 18px;
+  min-height: 38px;
+  cursor: pointer;
+}
+.kswitch__btn:active { background: var(--accent); border-color: var(--accent); color: var(--paper); }
+
 /* --------------------------------------------------------------- toast --- */
 
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(28px + var(--safe-b));
+  /* Clears the keypad (or the switch bar) so Undo is never buried under it. */
+  bottom: calc(var(--dock-h, 0px) + 20px + var(--safe-b));
   transform: translate(-50%, 10px);
   z-index: 30;
   background: var(--ink);
@@ -824,7 +915,7 @@ code {
 /* Rules stay full-bleed like ruled stock; content holds a 680px measure. */
 @media (min-width: 620px) {
   :root { --gap: 24px; }
-  .topbar, .stream, .composer {
+  .topbar, .stream, .composer, .keypad__bar, .keypad__pages, .kswitch {
     padding-inline: max(var(--gap), calc(50vw - 340px));
   }
   .card__result { font-size: 24px; }

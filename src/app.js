@@ -101,10 +101,52 @@
 
   const OP_ORDER = ['derivative', 'integral', 'limit', 'simplify', 'solve', 'plot', 'table'];
 
-  const SYMBOLS = [
-    ['(', '('], [')', ')'], ['^', '^'], ['/', '/'], [',', ','],
-    ['sqrt(', '√'], ['pi', 'π'], ['oo', '∞'], ['e', 'e'], ['=', '='],
+  /* Keypad pages. A key is [label, spec]: a plain string inserts literally,
+   * {fn} inserts `name()` with the caret inside, {act} runs an action. */
+  const KEYPAD = [
+    {
+      id: 'num',
+      tab: '123',
+      cols: 5,
+      keys: [
+        ['7', '7'], ['8', '8'], ['9', '9'], ['(', { act: 'open' }], [')', { act: 'close' }],
+        ['4', '4'], ['5', '5'], ['6', '6'], ['^', '^'], ['÷', '/'],
+        ['1', '1'], ['2', '2'], ['3', '3'], ['×', '*'], ['−', '-'],
+        ['0', '0'], ['.', '.'], ['x', 'x'], [',', ','], ['+', '+'],
+        ['◀', { act: 'left', repeat: true }], ['▶', { act: 'right', repeat: true }],
+        ['π', 'pi'], ['=', '='], ['⏎', { act: 'enter', wide: true }],
+      ],
+    },
+    {
+      id: 'fn',
+      tab: 'ƒ(x)',
+      cols: 5,
+      keys: [
+        ['sin', { fn: 'sin' }], ['cos', { fn: 'cos' }], ['tan', { fn: 'tan' }],
+        ['ln', { fn: 'ln' }], ['log', { fn: 'log' }],
+        ['√', { fn: 'sqrt' }], ['exp', { fn: 'exp' }], ['|x|', { fn: 'abs' }],
+        ['∞', 'oo'], ['!', '!'],
+        ['asin', { fn: 'asin' }], ['acos', { fn: 'acos' }], ['atan', { fn: 'atan' }],
+        ['x²', '^2'], ['x⁻¹', '^-1'],
+      ],
+    },
+    {
+      id: 'var',
+      tab: 'abc',
+      cols: 6,
+      keys: [
+        ['x', 'x'], ['y', 'y'], ['z', 'z'], ['t', 't'], ['n', 'n'], ['k', 'k'],
+        ['θ', 'theta'], ['ω', 'omega'], ['φ', 'phi'], ['τ', 'tau'],
+        ['α', 'alpha'], ['β', 'beta'],
+        ['λ', 'lamda'], ['μ', 'mu'], ['σ', 'sigma'], ['ε', 'epsilon'],
+        ['ρ', 'rho'], ['δ', 'delta'],
+        ['abc — phone keyboard', { act: 'native', full: true }],
+      ],
+    },
   ];
+
+  const KEYPAD_PAGE_KEY = 'nabla.keypad.page.v1';
+  const KEYBOARD_KEY = 'nabla.keyboard.v1';
 
   // --------------------------------------------------------------- state --
 
@@ -115,6 +157,9 @@
     ready: false,
     busy: false,
     varTouched: {},
+    keypadPage: 'num',
+    keypadOpen: true,
+    keyboard: 'math',
   };
 
   for (const [name, spec] of Object.entries(OPS)) {
@@ -126,10 +171,13 @@
   const el = {
     boot: $('boot'), bootStatus: $('bootStatus'), bootBar: $('bootBar'),
     stream: $('stream'), intro: $('intro'), preview: $('preview'),
-    chips: $('chips'), params: $('params'), symbols: $('symbols'),
+    chips: $('chips'), params: $('params'),
     form: $('form'), input: $('input'), go: $('go'), toast: $('toast'),
     themeBtn: $('themeBtn'), exportBtn: $('exportBtn'), clearBtn: $('clearBtn'),
     themeColor: $('themeColor'),
+    keypad: $('keypad'), keypadTabs: $('keypadTabs'), keypadPages: $('keypadPages'),
+    kpBack: $('kpBack'), kpToggle: $('kpToggle'),
+    kswitch: $('kswitch'), kswitchBtn: $('kswitchBtn'),
   };
 
   const charts = new Map();
@@ -272,8 +320,11 @@
       } else {
         const input = document.createElement('input');
         input.type = 'text';
+        // Variables are no longer just single letters now that the keypad
+        // makes `omega` and `theta` a single tap.
         input.className = 'field__input' +
-          (field.kind === 'var' || field.kind === 'int' ? ' field__input--narrow' : '');
+          (field.kind === 'int' ? ' field__input--narrow' : '') +
+          (field.kind === 'var' ? ' field__input--var' : '');
         input.value = values[field.name];
         input.id = `f-${field.name}`;
         input.autocomplete = 'off';
@@ -292,18 +343,175 @@
     }
   }
 
-  function renderSymbols() {
-    el.symbols.innerHTML = '';
-    for (const [insert, label] of SYMBOLS) {
-      const button = node('button', 'sym', label);
-      button.type = 'button';
-      button.tabIndex = -1;
-      button.addEventListener('pointerdown', (event) => {
-        event.preventDefault();
-        insertAtCursor(insert);
-      });
-      el.symbols.appendChild(button);
+  // ---------------------------------------------------------- math keypad --
+
+  /* Only worth replacing the system keyboard where there is one to replace. */
+  function keypadWanted() {
+    return matchMedia('(max-width: 619px), (pointer: coarse)').matches;
+  }
+
+  function renderKeypad() {
+    el.keypadTabs.innerHTML = '';
+    el.keypadPages.innerHTML = '';
+
+    for (const page of KEYPAD) {
+      const tab = node('button', 'ktab', page.tab);
+      tab.type = 'button';
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', String(page.id === state.keypadPage));
+      tab.addEventListener('pointerdown', (event) => event.preventDefault());
+      tab.addEventListener('click', () => setKeypadPage(page.id));
+      el.keypadTabs.appendChild(tab);
+
+      const grid = node('div', 'kgrid');
+      grid.dataset.page = page.id;
+      grid.style.setProperty('--cols', String(page.cols));
+      grid.hidden = page.id !== state.keypadPage;
+
+      for (const [label, spec] of page.keys) {
+        const config = typeof spec === 'string' ? { text: spec } : spec;
+        const key = node('button', 'key', label);
+        key.type = 'button';
+        key.tabIndex = -1;
+        if (config.full) key.classList.add('key--full');
+        if (config.wide) key.classList.add('key--wide');
+        if (config.act === 'enter') key.classList.add('key--go');
+        if (config.fn || config.act === 'native') key.classList.add('key--word');
+
+        bindKey(key, () => pressKey(config), config.repeat);
+        grid.appendChild(key);
+      }
+      el.keypadPages.appendChild(grid);
     }
+  }
+
+  /* preventDefault on pointerdown keeps focus (and the caret) in the input;
+   * without it every tap would blur the field and collapse the keypad. */
+  function bindKey(button, run, repeatable) {
+    let timer = null;
+    let interval = null;
+
+    const stop = () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+      timer = null;
+      interval = null;
+    };
+
+    button.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      run();
+      if (!repeatable) return;
+      timer = setTimeout(() => {
+        interval = setInterval(run, 55);
+      }, 380);
+    });
+    for (const type of ['pointerup', 'pointerleave', 'pointercancel']) {
+      button.addEventListener(type, stop);
+    }
+  }
+
+  /* Letter followed by letter is the ambiguous case: `omega` then `t` gives
+   * `omegat`, which split_symbols shreds into six single letters, and `x`
+   * then `pi` gives `xpi` rather than x·π. An implicit `*` makes the tap
+   * sequence mean what it looks like. A digit before is fine — `2pi` and
+   * `2x` already parse as products and read better without the star. */
+  function insertName(name) {
+    const caret = el.input.selectionStart ?? el.input.value.length;
+    const before = el.input.value[caret - 1] || '';
+    insertAtCursor((/[A-Za-z]/.test(before) ? '*' : '') + name);
+  }
+
+  function pressKey(config) {
+    if (config.text != null) {
+      if (/^[A-Za-z]/.test(config.text)) insertName(config.text);
+      else insertAtCursor(config.text);
+      return;
+    }
+    if (config.fn) {
+      insertAtCursor(`${config.fn}()`, config.fn.length + 1);
+      return;
+    }
+    switch (config.act) {
+      case 'open':
+        insertAtCursor('()', 1);
+        break;
+      case 'close': {
+        // Step over the auto-inserted bracket rather than doubling it.
+        const caret = el.input.selectionStart ?? 0;
+        if (el.input.value[caret] === ')') moveCaret(1);
+        else insertAtCursor(')');
+        break;
+      }
+      case 'left': moveCaret(-1); break;
+      case 'right': moveCaret(1); break;
+      case 'enter': submit(); break;
+      case 'native': setKeyboard('native'); break;
+      default: break;
+    }
+  }
+
+  function moveCaret(delta) {
+    const input = el.input;
+    const caret = Math.max(0, Math.min(input.value.length, (input.selectionStart ?? 0) + delta));
+    input.focus();
+    input.setSelectionRange(caret, caret);
+  }
+
+  function backspace() {
+    const input = el.input;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? start;
+    if (start !== end) input.setRangeText('', start, end, 'end');
+    else if (start > 0) input.setRangeText('', start - 1, start, 'end');
+    else return;
+    input.focus();
+    schedulePreview();
+  }
+
+  function setKeypadPage(id) {
+    state.keypadPage = id;
+    try { localStorage.setItem(KEYPAD_PAGE_KEY, id); } catch (err) { /* private mode */ }
+    el.keypadTabs.querySelectorAll('.ktab').forEach((tab, index) => {
+      tab.setAttribute('aria-selected', String(KEYPAD[index].id === id));
+    });
+    el.keypadPages.querySelectorAll('.kgrid').forEach((grid) => {
+      grid.hidden = grid.dataset.page !== id;
+    });
+  }
+
+  function setKeypadOpen(open) {
+    state.keypadOpen = open;
+    el.keypad.classList.toggle('keypad--closed', !open);
+    el.kpToggle.innerHTML = open ? '&#9662;' : '&#9652;';
+    el.kpToggle.setAttribute('aria-label', open ? 'Hide keypad' : 'Show keypad');
+    syncDockHeight();
+  }
+
+  /* Whatever is docked at the bottom sets the floor the toast must clear. */
+  function syncDockHeight() {
+    let height = 0;
+    if (!el.keypad.hidden) height = el.keypad.getBoundingClientRect().height;
+    else if (!el.kswitch.hidden) height = el.kswitch.getBoundingClientRect().height;
+    document.documentElement.style.setProperty('--dock-h', `${Math.round(height)}px`);
+  }
+
+  /* 'math' swaps the system keyboard for ours via inputmode="none", which
+   * still leaves a real caret and text selection in the field. */
+  function setKeyboard(mode) {
+    state.keyboard = mode;
+    try { localStorage.setItem(KEYBOARD_KEY, mode); } catch (err) { /* private mode */ }
+    applyKeyboard();
+    el.input.focus();
+  }
+
+  function applyKeyboard() {
+    const wanted = keypadWanted();
+    const math = wanted && state.keyboard === 'math';
+    el.input.setAttribute('inputmode', math ? 'none' : 'text');
+    el.keypad.hidden = !math;
+    el.kswitch.hidden = !(wanted && state.keyboard === 'native');
+    syncDockHeight();
   }
 
   function setOp(name) {
@@ -314,12 +522,14 @@
     schedulePreview();
   }
 
-  function insertAtCursor(text) {
+  /* caretOffset lands the cursor inside what was inserted — `sin()` wants it
+   * between the brackets, not after them. Defaults to the end. */
+  function insertAtCursor(text, caretOffset) {
     const input = el.input;
     const start = input.selectionStart ?? input.value.length;
     const end = input.selectionEnd ?? input.value.length;
     input.value = input.value.slice(0, start) + text + input.value.slice(end);
-    const caret = start + text.length;
+    const caret = start + (caretOffset == null ? text.length : caretOffset);
     input.focus();
     input.setSelectionRange(caret, caret);
     schedulePreview();
@@ -438,6 +648,9 @@
       data: result.data,
       error: result.error,
     });
+
+    // Give the result the screen; tapping the input brings the keypad back.
+    setKeypadOpen(false);
   }
 
   // --------------------------------------------------------------- cards --
@@ -1063,6 +1276,7 @@
     const viewport = window.visualViewport;
     const height = viewport ? viewport.height : window.innerHeight;
     document.documentElement.style.setProperty('--app-height', `${Math.round(height)}px`);
+    syncDockHeight();
   }
 
   // ---------------------------------------------------------------- init --
@@ -1078,9 +1292,17 @@
     const requested = new URLSearchParams(location.search).get('op');
     if (requested && OPS[requested]) state.op = requested;
 
+    try {
+      const savedPage = localStorage.getItem(KEYPAD_PAGE_KEY);
+      if (KEYPAD.some((page) => page.id === savedPage)) state.keypadPage = savedPage;
+      if (localStorage.getItem(KEYBOARD_KEY) === 'native') state.keyboard = 'native';
+    } catch (err) { /* private mode */ }
+
     renderChips();
     renderParams();
-    renderSymbols();
+    renderKeypad();
+    applyKeyboard();
+    setKeypadOpen(true);
     el.input.placeholder = OPS[state.op].placeholder;
     load();
 
@@ -1089,6 +1311,17 @@
       submit();
     });
     el.input.addEventListener('input', schedulePreview);
+    // Both: the keys preventDefault so focus never leaves the field, which
+    // means re-tapping it fires no focus event — only a click.
+    el.input.addEventListener('focus', () => setKeypadOpen(true));
+    el.input.addEventListener('click', () => setKeypadOpen(true));
+
+    bindKey(el.kpBack, backspace, true);
+    el.kpToggle.addEventListener('pointerdown', (event) => event.preventDefault());
+    el.kpToggle.addEventListener('click', () => setKeypadOpen(!state.keypadOpen));
+    el.kswitchBtn.addEventListener('click', () => setKeyboard('math'));
+    matchMedia('(max-width: 619px)').addEventListener('change', applyKeyboard);
+
     el.themeBtn.addEventListener('click', toggleTheme);
     el.exportBtn.addEventListener('click', exportMarkdown);
 

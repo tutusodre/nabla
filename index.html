@@ -77,7 +77,6 @@
 <footer class="composer" id="composer">
   <nav class="chips" id="chips" aria-label="Operation"></nav>
   <div class="params" id="params"></div>
-  <div class="symbols" id="symbols"></div>
   <form class="entry" id="form" autocomplete="off">
     <input class="entry__input" id="input" type="text" inputmode="text"
            autocapitalize="off" autocorrect="off" spellcheck="false"
@@ -105,6 +104,21 @@
     </p>
   </section>
 </main>
+
+<section class="keypad" id="keypad" hidden aria-label="Math keypad">
+  <div class="keypad__bar">
+    <div class="keypad__tabs" id="keypadTabs" role="tablist" aria-label="Keypad page"></div>
+    <button class="kbar" id="kpBack" type="button" aria-label="Backspace">&#9003;</button>
+    <button class="kbar" id="kpToggle" type="button" aria-label="Hide keypad">&#9662;</button>
+  </div>
+  <div class="keypad__pages" id="keypadPages"></div>
+</section>
+
+<div class="kswitch" id="kswitch" hidden>
+  <button class="kswitch__btn" id="kswitchBtn" type="button">
+    <span aria-hidden="true">&#8711;</span> Math keypad
+  </button>
+</div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
