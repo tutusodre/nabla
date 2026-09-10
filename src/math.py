@@ -298,8 +298,12 @@ def _parse(src, extra=None):
     #
     # Nothing has built a Quantity until a binding value held a letter or a
     # substitute resolved a constant, so `_quantities_possible()` rules units
-    # out cheaply. It rules nothing in — `a = 2c` arms it — and parse_expr can
-    # hand back a list or a Boolean, neither of which has atoms to scan.
+    # out cheaply. It rules nothing in — `a = 2c` arms it.
+    #
+    # The `sp.Expr` guard is not about atoms: a Boolean has those too. It is
+    # what keeps Relationals out of the dimension check — `x > 1` is not a
+    # quantity and has no factor and dimension to collect — and it also skips
+    # the list parse_expr hands back for `[1, 2]`.
     if _quantities_possible() and isinstance(expr, sp.Expr) and _has_units(expr):
         _check_dimensions(expr)
     return expr
@@ -407,13 +411,19 @@ def _parse_float(src, label):
 
 
 # --------------------------------------------------------------------------
-# units — in scope on the right of a binding, and nowhere else
+# units
 # --------------------------------------------------------------------------
 #
 # The expression parser multiplies implicitly and treats m, s, N, K, c and k as
 # ordinary variables, which is what makes `2m` and `kx` work at all. Unit names
 # would collide with every one of them, so they are layered over LOCALS only
 # when a binding's value is read — never when the expression itself is parsed.
+#
+# Two things below reach past a binding, and deliberately. `_parse_answer`
+# layers the long spellings over LOCALS to re-read a stored result, because a
+# printed Quantity says "meter" and `ans` has to round-trip. `_check_dimensions`
+# runs from `_parse` for every op, because units arriving through `ans` have to
+# be checked wherever they land, not only where they were written.
 
 _UNIT_CACHE = {}
 
@@ -493,8 +503,9 @@ def _physical_names():
     Deliberately a separate table from the unit namespace rather than folded
     into it. `h` is an hour and `g` a gram on the right of a binding — that is
     what `v = 90 km/h` and `m = 500 g` mean — and merging the two dicts would
-    quietly redefine both. The constants are resolved against the expression
-    instead, where no unit name is in scope.
+    quietly redefine both. These names are resolved after parsing instead, on
+    the symbols a substitute leaves standing — whether they came from the
+    expression or rode in on a binding's value, since `a = 2c` is 2c too.
     """
     if _PHYSICAL_CACHE:
         return _PHYSICAL_CACHE
@@ -553,12 +564,27 @@ def _parse_answer(text):
     return _parse(text, extra={name: names[name] for name in _UNIT_NAMES})
 
 
-_DIMENSION_RE = re.compile(r"Dimension\(([^()]*)\)")
+# `Dimension(action, A)` carries the dimension's own abbreviation as a second
+# argument; only the first is a word the sentence can use, so the rest goes.
+_DIMENSION_RE = re.compile(r"Dimension\(([^(),]*)[^()]*\)")
+
+# SymPy names the offending quantity in quotes, in its own spelling.
+_QUOTED_NAME_RE = re.compile(r'"([A-Za-z_][A-Za-z0-9_]*)"')
 
 
 def _unit_mismatch(exc):
-    """SymPy's dimension complaint, without the Dimension(...) wrapping."""
-    return _DIMENSION_RE.sub(r"\1", str(exc)).strip().rstrip(".")
+    """SymPy's dimension complaint, in this app's spelling.
+
+    Two rewritings. The Dimension(...) wrapping goes, along with the symbol
+    SymPy packs beside the dimension's name. And the quantity is renamed:
+    SymPy calls it `speed_of_light` and `planck`, but `c` and `h` are what the
+    user typed and the only names this app has ever shown them.
+    """
+    text = _DIMENSION_RE.sub(r"\1", str(exc)).strip().rstrip(".")
+    return _QUOTED_NAME_RE.sub(
+        lambda m: '"%s"' % _PHYSICAL_BY_SYMPY.get(m.group(1), (m.group(1),))[0],
+        text,
+    )
 
 
 def _has_units(expr):
@@ -1412,16 +1438,19 @@ def op_plot(source="", x_min="-10", x_max="10", samples=700):
             )
         var = free[0] if free else sp.Symbol("x")
 
+        # The cast to float is inside the try, not after it: a unit-bearing
+        # `ans` lambdifies fine and only fails here, and outside it that
+        # failure escapes as SymPy's own untranslated "Cannot convert
+        # expression to float" instead of the message below.
         try:
             fn = sp.lambdify(var, expr, modules=["numpy"])
             with np.errstate(all="ignore"):
                 raw = np.asarray(fn(xs))
+            if np.iscomplexobj(raw):
+                raw = np.where(np.abs(raw.imag) < 1e-9, raw.real, np.nan)
+            ys = np.asarray(raw, dtype=float) + np.zeros_like(xs)
         except Exception:
             raise MathError("Couldn’t evaluate “%s” numerically.", part)
-
-        if np.iscomplexobj(raw):
-            raw = np.where(np.abs(raw.imag) < 1e-9, raw.real, np.nan)
-        ys = np.asarray(raw, dtype=float) + np.zeros_like(xs)
 
         # Break the line at jump discontinuities so asymptotes aren't drawn as
         # vertical strokes. A jump is a step far larger than the typical step.
@@ -1482,16 +1511,17 @@ def op_table(source="", variable="x", start="-5", stop="5", step="1"):
     total = min(total, 400)
 
     xs = begin + increment * np.arange(total)
+    # Inside the try for the reason op_plot gives: a unit-bearing `ans` gets
+    # this far and fails on the cast, and only here is the message translated.
     try:
         fn = sp.lambdify(var, expr, modules=["numpy"])
         with np.errstate(all="ignore"):
             raw = np.asarray(fn(xs))
+        if np.iscomplexobj(raw):
+            raw = np.where(np.abs(raw.imag) < 1e-9, raw.real, np.nan)
+        ys = np.asarray(raw, dtype=float) + np.zeros_like(xs)
     except Exception:
         raise MathError("Couldn’t evaluate that function numerically.")
-
-    if np.iscomplexobj(raw):
-        raw = np.where(np.abs(raw.imag) < 1e-9, raw.real, np.nan)
-    ys = np.asarray(raw, dtype=float) + np.zeros_like(xs)
 
     return {
         "statement": r"%s(%s) = %s" % ("f", _latex(var), _latex(expr)),
