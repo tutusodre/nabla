@@ -293,6 +293,11 @@ def _t(text):
 
 _NOT_AN_EXPRESSION = "That isn’t an expression — type something like “x^2 + 1”."
 
+# The two TypeErrors that mean "these do not combine" — see `_parse`. Matched on
+# the message because Python raises the same class for every one of them, and
+# only these two are the parser's own doing rather than the user's.
+_UNCOMBINABLE_RE = re.compile(r"unsupported operand type|multiply sequence")
+
 
 def _expression(value):
     """Insist on an expression — something with arithmetic to do."""
@@ -321,33 +326,25 @@ def _parse(src, extra=None):
         names = {**names, "ans": LAST_ANS}
     try:
         parsed = parse_expr(text, local_dict=names, transformations=TRANSFORMS)
-    except TypeError:
-        # `parse_expr` evaluates what it builds, so a bare function name standing
-        # where a value belongs — `2 sin`, or `90 min` now that min is a function
-        # again and not a minute — gets past the syntax check and fails on the
-        # multiplication, as "unsupported operand type(s) for *: 'Integer' and
-        # 'FunctionClass'". The catch is bounded to this one call, where a
-        # TypeError can only mean the text combined things that do not combine;
-        # every op's own TypeErrors are still read by `_friendly`.
+    except TypeError as exc:
+        # `parse_expr` evaluates what it builds, so a bare name standing where a
+        # value belongs gets past the syntax check and fails on the implicit
+        # multiplication instead: `2 sin` as "unsupported operand type(s) for *:
+        # 'Integer' and 'FunctionClass'", and `min(1, 2)` inside a binding —
+        # where `min` is the minute — as "can't multiply sequence by non-int of
+        # type 'Quantity'". Neither sentence is about anything the user typed,
+        # so both become the one below.
+        #
+        # Only those two, though. Every other TypeError from here is about
+        # something the user really did write, and already has a better sentence
+        # waiting in `_friendly`: `1 < x < 3` is a chained comparison, which
+        # Python evaluates with `and`, so it raises "cannot determine truth value
+        # of Relational" — a missing concrete value, not a malformed expression —
+        # and `atan2(1)` is an arity slip that names itself perfectly well.
+        if not _UNCOMBINABLE_RE.search(str(exc)):
+            raise
         raise MathError(_NOT_AN_EXPRESSION)
-    expr = sp.sympify(parsed)
-    # Units reach every other operation through `ans`, and "mismatched
-    # dimensions are an error, not a silent number" is not substitute's promise
-    # alone: `ans + 1` on 29.43 m/s has to fail here too.
-    #
-    # Nothing has built a Quantity until a binding value held a letter or a
-    # substitute resolved a constant, so `_quantities_possible()` rules units
-    # out cheaply. It rules nothing in — `a = 2c` arms it.
-    #
-    # The guard is about what `_check_dimensions` knows how to read, not about
-    # atoms — it skips the plain list parse_expr hands back for `[1, 2]`, and
-    # the FiniteSet it hands back for `{1, 2}`. Comparisons are in, not out:
-    # `ans > 1` on a velocity is a mismatch like any other, and the fact that a
-    # Relational has no factor and dimension of its own is why it needs taking
-    # apart there rather than skipping here.
-    if _quantities_possible() and isinstance(expr, _CHECKABLE) and _has_units(expr):
-        _check_dimensions(expr)
-    return expr
+    return _check_units(sp.sympify(parsed))
 
 
 def _split_top(text, sep=","):
@@ -391,7 +388,19 @@ def _parse_equation(src):
         left, right = halves
         if not left.strip() or not right.strip():
             raise MathError("An equation needs an expression on both sides of `=`.")
-        return sp.Eq(_parse(left), _parse(right))
+        # `sp.Eq` sympifies what it is handed, so a side that isn't an
+        # expression — `[1, 2] = x`, or `x = [1, 2]` — reaches it as a
+        # SympifyError, and "SympifyError: [1, 2]" is a Python class name in the
+        # interface. The gate says the same thing about the same input, in a
+        # sentence, before Eq ever sees it.
+        equation = sp.Eq(_expression(_parse(left)), _expression(_parse(right)))
+        # Each side was checked alone on its way through `_parse`, and alone
+        # each side of `ans = 1` is beyond reproach — a velocity is a fine
+        # expression and so is 1. The equation is the thing that doesn't hold
+        # up, so the equation is what gets checked, by the same reasoning the
+        # Relational branch uses for `a > b`: `a = b` means something exactly
+        # when `a - b` does.
+        return _check_units(equation)
     return _parse(src)
 
 
@@ -481,16 +490,19 @@ _UNIT_ALIASES = {
     "K": "kelvin", "mol": "mole", "cd": "candela", "N": "newton", "J": "joule",
     "W": "watt", "V": "volt", "C": "coulomb", "F": "farad", "H": "henry",
     "S": "siemens", "T": "tesla", "Wb": "weber", "Pa": "pascal", "Hz": "hertz",
-    "rad": "radian", "L": "liter", "h": "hour",
+    "rad": "radian", "L": "liter", "h": "hour", "min": "minute",
     "Ω": "ohm", "Ohm": "ohm",
 }
 
-# No `min` alias, deliberately. Every other alias shadows an ordinary variable;
-# `min` would shadow a function, and inside a binding it did — `x = min(1, 2)`
-# read as a call on a Quantity and came back as "can't multiply sequence by
-# non-int of type 'Quantity'", a Python sentence about a Python type. `minute`
-# is still spelled out on the right of a binding, `h` still means an hour, and
-# `min(a, b)` keeps working everywhere.
+# `min` is the one alias that shadows a function rather than a variable, and it
+# is worth it. Inside a binding — the only place any of these are in scope —
+# `x = min(1, 2)` now reads as a Quantity where a call was meant and fails, but
+# it fails in a sentence: `_parse` turns that TypeError into "that isn't an
+# expression" like any other pair of things that do not combine. So the trade is
+# `t = 90 min` working against `min(1, 2)` being spelled `Min(1, 2)` in a
+# binding — capital M is untouched here, and lowercase `min` is still the
+# function everywhere outside one. For a calculator aimed at physics, minutes in
+# a binding are the commoner ask by a distance.
 
 # Powers of ten, not floats: `1 km` has to stay 1000*meter rather than
 # 1000.0*meter and drag a decimal point through every exact result.
@@ -504,8 +516,8 @@ _PREFIXES = {
 # second list: kHz, mA and km are all written with the alias.
 _PREFIXED_LONG = ("ohm",)
 
-# kg already carries its prefix, and nobody writes mh.
-_NO_PREFIX = {"kg", "h"}
+# kg already carries its prefix, and nobody writes mh or kmin.
+_NO_PREFIX = {"kg", "h", "min"}
 
 
 def _unit_names():
@@ -692,6 +704,32 @@ def _has_units(expr):
 # it holds, not for itself; everything else parse_expr can return — a list, a
 # Tuple, a FiniteSet — has no dimensions to disagree about.
 _CHECKABLE = (sp.Expr, sp.logic.boolalg.Boolean)
+
+
+def _check_units(expr):
+    """Dimension-check `expr` when there is anything there to check.
+
+    The one gate every parse goes through, so that "mismatched dimensions are
+    an error, not a silent number" holds wherever units arrive. They arrive in
+    more places than substitute: `ans + 1` on 29.43 m/s is parsed by whichever
+    op the user is in, and `ans = 1` is built half at a time by
+    `_parse_equation`, which is why that one hands the assembled equation back
+    here rather than trusting the two halves it checked separately.
+
+    Nothing has built a Quantity until a binding value held a letter or a
+    substitute resolved a constant, so `_quantities_possible()` rules units out
+    cheaply. It rules nothing in — `a = 2c` arms it.
+
+    The `_CHECKABLE` test is about what `_check_dimensions` knows how to read,
+    not about atoms — it skips the plain list parse_expr hands back for
+    `[1, 2]`, and the FiniteSet it hands back for `{1, 2}`. Comparisons are in,
+    not out: `ans > 1` on a velocity is a mismatch like any other, and the fact
+    that a Relational has no factor and dimension of its own is why it needs
+    taking apart there rather than skipping here.
+    """
+    if _quantities_possible() and isinstance(expr, _CHECKABLE) and _has_units(expr):
+        _check_dimensions(expr)
+    return expr
 
 
 def _check_dimensions(expr):
@@ -1503,8 +1541,10 @@ def op_substitute(source="", at=""):
 
 
 def op_solve(source="", variable="x", complex_roots=False):
-    # Same latitude as substitute: an inequality is something to solve, and
-    # `sp.Eq` sympifies its argument, so a list reaches it as a SympifyError.
+    # Same latitude as substitute: an inequality is something to solve. A list
+    # is not, and `_parse_equation` is where that gets said — both for `[1,2]`
+    # standing alone, caught by `_symbolic` here, and for `[1,2] = x`, where
+    # `sp.Eq` would otherwise sympify it into a SympifyError.
     parsed = _symbolic(_parse_equation(source))
     var = _sym(variable)
     equation = parsed if isinstance(parsed, sp.Eq) else sp.Eq(parsed, 0)

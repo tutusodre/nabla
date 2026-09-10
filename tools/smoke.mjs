@@ -403,6 +403,33 @@ const GROUPS = {
       card && card.failed && /isn.t an expression|não é uma expressão/.test(card.text)
         && !/attribute|object/i.test(card.text), card?.text);
 
+    /* Three inputs `parse_expr` answers with the same TypeError, and three
+     * different mistakes. Only the first is the parser's own doing: `2 sin`
+     * puts a function name where a value belongs and fails on the implicit
+     * multiplication, whose complaint — "unsupported operand type(s) for *" —
+     * is about nothing the user typed. The other two are the user's own, and
+     * each already had a better sentence: a chained comparison is an
+     * expression, it just needs a concrete value, and an arity slip names its
+     * arity. The card echoes the source it was given, so the assertion for
+     * each of those two is the message the other two must not get. */
+    await app.enter('2 sin');
+    card = await app.lastCard();
+    check('a bare function name is not an expression',
+      card && card.failed && /isn.t an expression|não é uma expressão/.test(card.text),
+      card?.text);
+
+    await app.enter('1 < x < 3');
+    card = await app.lastCard();
+    check('a chained comparison asks for a concrete value',
+      card && card.failed && /concrete value|valor concreto/i.test(card.text)
+        && !/isn.t an expression|não é uma expressão/.test(card.text), card?.text);
+
+    await app.enter('atan2(1)');
+    card = await app.lastCard();
+    check('an arity slip names the arity',
+      card && card.failed && /exactly 2 arguments/i.test(card.text)
+        && !/isn.t an expression|não é uma expressão/.test(card.text), card?.text);
+
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },
 
@@ -471,20 +498,40 @@ const GROUPS = {
     check('bare names still mean variables, not units',
       card && !card.failed && /\b5\b/.test(card.text), card?.text);
 
-    /* `min` was an alias for the minute, and unit aliases are in scope on the
-     * right of a binding — so min(1, 2) called a Quantity there and came back
-     * as "can't multiply sequence by non-int of type 'Quantity'". The alias is
-     * gone. Three to the fifth is 243, and the digit count is the point twice
-     * over: the binding is echoed in the card's own meta line, so a one-digit
-     * answer would be answered by the echo of `min(3, 5)` itself, and
-     * `formatTime` renders two digits either side of a colon, so no clock can
-     * hand over three adjacent ones. 3125 would mean min picked the larger. */
+    /* `min` is the minute on the right of a binding. 5400 is the assertion:
+     * read as ordinary symbols this stays 90*m*i*n, and only a real unit folds
+     * ninety minutes into seconds. The card echoes the binding text verbatim,
+     * so the four digits have to come from the answer — "90 min" has none of
+     * them, and `formatTime` renders two digits either side of a colon, so no
+     * clock can hand over four adjacent ones either. */
+    await app.setField('at', 't = 90 min');
+    await app.enter('t');
+    card = await app.lastCard();
+    check('min is a minute in a binding',
+      card && !card.failed && /5400/.test(card.text), card?.text);
+
+    /* The other side of that trade, and the reason it is affordable. Unit
+     * aliases are in scope on the right of a binding, so `min(3, 5)` there now
+     * reaches a Quantity where a call was meant — and it has to fail in a
+     * sentence. The absence of "Quantity" and "sequence" is as much the
+     * assertion as the failure: "can't multiply sequence by non-int of type
+     * 'Quantity'" is exactly what this used to answer. */
     await app.setField('at', 'x = min(3, 5)');
     await app.enter('x^5');
     card = await app.lastCard();
-    check('min is a function again, not a minute',
-      card && !card.failed && /\b243\b/.test(card.text)
-        && !/Quantity|sequence/i.test(card.text), card?.text);
+    check('min(3, 5) in a binding fails in a sentence',
+      card && card.failed && !/Quantity|sequence/i.test(card.text), card?.text);
+
+    /* `Min` is untouched by the alias, which is what keeps the trade a trade.
+     * Three to the fifth is 243, and the digit count is the point twice over:
+     * the binding is echoed in the card's own meta line, so a one-digit answer
+     * would be answered by the echo of `Min(3, 5)` itself, and no clock can
+     * hand over three adjacent digits. 3125 would mean Min picked the larger. */
+    await app.setField('at', 'x = Min(3, 5)');
+    await app.enter('x^5');
+    card = await app.lastCard();
+    check('Min still picks the smaller',
+      card && !card.failed && /\b243\b/.test(card.text), card?.text);
 
     /* Adding units must not take the decimal away. This coefficient is 4*pi,
      * and `as_coeff_Mul()` split that into the integer 4 — which the guard
@@ -537,6 +584,29 @@ const GROUPS = {
     check('a list result survives the unit gate',
       card && !card.failed && /1/.test(card.text) && /2/.test(card.text)
         && !/attribute/i.test(card.text), card?.text);
+
+    /* The dimension check has to refuse comparisons whose sides disagree, not
+     * comparisons with units in them. Three metres really is more than two
+     * centimetres, and the app has to say so end to end. */
+    await app.tapKey('x = a');
+    await app.setField('at', 'a = 3 m, b = 2 cm');
+    await app.enter('a > b');
+    card = await app.lastCard();
+    check('a legitimate unit comparison still answers',
+      card && !card.failed && /True/i.test(card.text), card?.text);
+
+    /* That one never reaches the dimension check, though — SymPy settles a
+     * comparison between two same-dimension quantities itself, and hands back
+     * a plain True before anything can look at it. So it cannot notice a
+     * Relational branch replaced by a blanket refusal, any more than `x > 1`
+     * at `x = 2` can. Leave a free symbol in and the comparison survives:
+     * `a*x > b` is still a Relational, still carries units, and is still
+     * dimensionally sound, so the branch has to take it apart and pass it.
+     * This is the one that comes back red when it refuses instead. */
+    await app.enter('a*x > b');
+    card = await app.lastCard();
+    check('a unit comparison the check really reads is not refused',
+      card && !card.failed && !/match up|batem/i.test(card.text), card?.text);
 
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },
