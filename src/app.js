@@ -217,6 +217,11 @@
     ready: false,
     busy: false,
     varTouched: {},
+    /* Which field the keypad types into: a parameter field's name, or null
+     * for the expression. A name rather than the node itself because
+     * renderParams() replaces those inputs wholesale, and a held reference
+     * would go on typing into one that has left the page. */
+    target: null,
     keypadPage: 'num',
     keypadOpen: true,
     keyboard: 'math',
@@ -369,6 +374,9 @@
 
   function renderParams() {
     el.params.innerHTML = '';
+    // The fields being rebuilt are the fields losing focus, so the keypad
+    // goes back to the expression along with it.
+    state.target = null;
     const spec = OPS[state.op];
     const values = state.params[state.op];
 
@@ -420,11 +428,15 @@
           (field.kind === 'var' ? ' field__input--var' : '');
         input.value = values[field.name];
         input.id = `f-${field.name}`;
+        // What the keypad routes by, and what tells it whether this field
+        // holds an expression or a name.
+        input.dataset.field = field.name;
+        input.dataset.kind = field.kind;
         input.autocomplete = 'off';
         input.spellcheck = false;
         input.setAttribute('autocapitalize', 'off');
         if (field.placeholder) input.placeholder = field.placeholder;
-        if (field.kind === 'int') input.inputMode = 'numeric';
+        applyFieldKeyboard(input);
         label.setAttribute('for', input.id);
         input.addEventListener('input', () => {
           values[field.name] = input.value;
@@ -509,15 +521,60 @@
     }
   }
 
+  /* The composer has more than one field and the keypad is the only keyboard
+   * there is on a phone, so every key resolves its target at press time.
+   * A name that no longer matches a field — the op changed under it — falls
+   * back to the expression rather than typing into nothing. */
+  function targetInput() {
+    if (!state.target) return el.input;
+    return el.params.querySelector(`.field__input[data-field="${state.target}"]`) || el.input;
+  }
+
+  /* The keypad follows the caret rather than leading it: whichever field the
+   * user is in is the one it types into, and tapping any of them brings it
+   * back up. focusin, not focus, because it bubbles — one listener then
+   * survives every renderParams() rebuild underneath it. */
+  function retarget(event) {
+    const field = event.target.closest('.entry__input, .field__input');
+    if (!field) {
+      // A checkbox or a button carries no caret, so focus landing on one puts
+      // the keypad back on the expression. A click that hit neither is not a
+      // focus change at all and leaves the target where it was.
+      if (event.type === 'focusin') state.target = null;
+      return;
+    }
+    state.target = field.dataset.field || null;
+    setKeypadOpen(true);
+  }
+
+  /* Every field already listens for its own `input` event — the expression
+   * schedules a preview, a parameter field writes state.params and marks the
+   * variable touched — so the keypad announces the edit instead of keeping a
+   * second copy of that bookkeeping. */
+  function commit(input) {
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  /* Whether what is being typed is read as maths. The implicit `*` below and
+   * nothing else depends on it: a `var` field holds a name and an `int` field
+   * a count, neither of which is an expression. */
+  function holdsExpression(input) {
+    return input === el.input || input.dataset.kind === 'text';
+  }
+
   /* Letter followed by letter is the ambiguous case: `omega` then `t` gives
    * `omegat`, which split_symbols shreds into six single letters, and `x`
    * then `pi` gives `xpi` rather than x·π. An implicit `*` makes the tap
    * sequence mean what it looks like. A digit before is fine — `2pi` and
-   * `2x` already parse as products and read better without the star. */
+   * `2x` already parse as products and read better without the star. None of
+   * it applies outside an expression: `x` then `y` in a variable field is the
+   * two-letter name, not a product. */
   function insertName(name) {
-    const caret = el.input.selectionStart ?? el.input.value.length;
-    const before = el.input.value[caret - 1] || '';
-    insertAtCursor((/[A-Za-z]/.test(before) ? '*' : '') + name);
+    const input = targetInput();
+    const caret = input.selectionStart ?? input.value.length;
+    const before = input.value[caret - 1] || '';
+    const star = holdsExpression(input) && /[A-Za-z]/.test(before);
+    insertAtCursor((star ? '*' : '') + name);
   }
 
   function pressKey(config) {
@@ -536,8 +593,9 @@
         break;
       case 'close': {
         // Step over the auto-inserted bracket rather than doubling it.
-        const caret = el.input.selectionStart ?? 0;
-        if (el.input.value[caret] === ')') moveCaret(1);
+        const input = targetInput();
+        const caret = input.selectionStart ?? 0;
+        if (input.value[caret] === ')') moveCaret(1);
         else insertAtCursor(')');
         break;
       }
@@ -553,21 +611,21 @@
   }
 
   function moveCaret(delta) {
-    const input = el.input;
+    const input = targetInput();
     const caret = Math.max(0, Math.min(input.value.length, (input.selectionStart ?? 0) + delta));
     input.focus();
     input.setSelectionRange(caret, caret);
   }
 
   function backspace() {
-    const input = el.input;
+    const input = targetInput();
     const start = input.selectionStart ?? input.value.length;
     const end = input.selectionEnd ?? start;
     if (start !== end) input.setRangeText('', start, end, 'end');
     else if (start > 0) input.setRangeText('', start - 1, start, 'end');
     else return;
     input.focus();
-    schedulePreview();
+    commit(input);
   }
 
   function setKeypadPage(id) {
@@ -609,10 +667,21 @@
     el.input.focus();
   }
 
+  /* Same trade as the expression field: while our keypad is up, the phone's
+   * own keyboard must not come up over it. renderParams() builds these inputs
+   * fresh whenever the op or the language changes, so each one asks for the
+   * current mode as it is made rather than waiting for the next
+   * applyKeyboard(). */
+  function applyFieldKeyboard(input) {
+    if (keypadWanted() && state.keyboard === 'math') input.inputMode = 'none';
+    else input.inputMode = input.dataset.kind === 'int' ? 'numeric' : 'text';
+  }
+
   function applyKeyboard() {
     const wanted = keypadWanted();
     const math = wanted && state.keyboard === 'math';
     el.input.setAttribute('inputmode', math ? 'none' : 'text');
+    el.params.querySelectorAll('.field__input').forEach((field) => applyFieldKeyboard(field));
     el.keypad.hidden = !math;
     // Ops live on the keypad when it's showing and on the chips when it isn't;
     // the native-keyboard switch hides the keypad on a phone too, not just on
@@ -634,14 +703,14 @@
   /* caretOffset lands the cursor inside what was inserted — `sin()` wants it
    * between the brackets, not after them. Defaults to the end. */
   function insertAtCursor(text, caretOffset) {
-    const input = el.input;
+    const input = targetInput();
     const start = input.selectionStart ?? input.value.length;
     const end = input.selectionEnd ?? input.value.length;
     input.value = input.value.slice(0, start) + text + input.value.slice(end);
     const caret = start + (caretOffset == null ? text.length : caretOffset);
     input.focus();
     input.setSelectionRange(caret, caret);
-    schedulePreview();
+    commit(input);
   }
 
   // ------------------------------------------------------------- preview --
@@ -1507,10 +1576,11 @@
       submit();
     });
     el.input.addEventListener('input', schedulePreview);
-    // Both: the keys preventDefault so focus never leaves the field, which
-    // means re-tapping it fires no focus event — only a click.
-    el.input.addEventListener('focus', () => setKeypadOpen(true));
-    el.input.addEventListener('click', () => setKeypadOpen(true));
+    // Both, and on the composer rather than on any one field: the keys
+    // preventDefault so focus never leaves the field being edited, which means
+    // re-tapping it fires no focus event — only a click.
+    el.composer.addEventListener('focusin', retarget);
+    el.composer.addEventListener('click', retarget);
 
     bindKey(el.kpBack, backspace, true);
     el.kpToggle.addEventListener('pointerdown', (event) => event.preventDefault());

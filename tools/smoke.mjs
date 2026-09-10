@@ -226,7 +226,10 @@ function makeApp(s) {
     })()`),
 
     /* Keys respond to pointerdown, not click — bindKey preventDefaults so the
-     * caret never leaves the input. Only the visible page is tappable. */
+     * caret never leaves the input. Only the visible page is tappable. The
+     * pointerup matters as much: a repeatable key (the caret arrows, the
+     * backspace) starts an auto-repeat 380 ms after the press, so a tap left
+     * hanging goes on typing for as long as the next assertion takes. */
     tapKey: (label) => s.eval(`(() => {
       const page = [...document.querySelectorAll('.kgrid')].find((g) => !g.hidden);
       if (!page) return false;
@@ -234,7 +237,52 @@ function makeApp(s) {
         .find((k) => k.textContent.trim() === ${json(label)});
       if (!key) return false;
       key.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      key.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
       return true;
+    })()`),
+
+    /* The backspace sits on the keypad's bar rather than in a page, so no
+     * amount of tapKey reaches it. */
+    tapBack: () => s.eval(`(() => {
+      const key = document.getElementById('kpBack');
+      if (!key) return false;
+      key.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      key.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+      return true;
+    })()`),
+
+    /* A tap on a field is a focus and a caret. The caret lands where the
+     * finger did, and a finger reaching for a value it means to extend lands
+     * at the end of what is already there. */
+    focusField: (name) => s.eval(`(() => {
+      const field = document.getElementById('f-' + ${json(name)});
+      if (!field) return false;
+      field.focus();
+      field.setSelectionRange(field.value.length, field.value.length);
+      return document.activeElement === field;
+    })()`),
+
+    focusMain: () => s.eval(`(() => {
+      const input = document.getElementById('input');
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+      return document.activeElement === input;
+    })()`),
+
+    fieldValue: (name) => s.eval(`(() => {
+      const field = document.getElementById('f-' + ${json(name)});
+      return field ? field.value : null;
+    })()`),
+
+    inputValue: () => s.eval('document.getElementById("input").value'),
+
+    /* Half of what the caret keys must not do is leave the field they were
+     * pressed for, so a field that no longer has focus answers null rather
+     * than a number. */
+    caretIn: (name) => s.eval(`(() => {
+      const field = document.getElementById('f-' + ${json(name)});
+      if (!field || document.activeElement !== field) return null;
+      return field.selectionStart;
     })()`),
 
     tapChip: (label) => s.eval(`(() => {
@@ -332,6 +380,15 @@ function makeApp(s) {
         text: card.innerText.replace(/\\s+/g, ' ').trim(),
       };
     })()`),
+
+    /* The answer on its own. A card also echoes the source and the statement
+     * it was computed from, so `d/dy of x*y` and `d/dx of x*y` produce cards
+     * that both have an x and a y in them; only the result plate tells them
+     * apart. */
+    lastResult: () => s.eval(`(() => {
+      const plate = document.querySelector('.card .card__result');
+      return plate ? plate.innerText.replace(/\\s+/g, ' ').trim() : null;
+    })()`),
   };
 }
 
@@ -403,6 +460,152 @@ const GROUPS = {
       await s.eval('getComputedStyle(document.querySelector(".chips")).display !== "none"'));
     check('a chip still switches op',
       await app.tapChip('lim') && await app.currentOp() === 'limit');
+
+    check('no console errors', s.errors.length === 0, s.errors.join(' | '));
+  },
+
+  /* The keypad is the only keyboard on a phone, so every field the composer
+   * shows has to be reachable from it — not just the expression. The whole
+   * group is written against the field the user is in, because the bug it
+   * covers was the keypad ignoring that and typing into the expression. */
+  keypad: async (s, app) => {
+    await s.open(APP);
+    await app.boot();
+    await app.tapTab('op');
+    check('substitute key selects it',
+      await app.tapKey('x = a') && await app.currentOp() === 'substitute');
+    await app.tapTab('num');
+
+    /* Where the keypad has always typed, and what everything below is only
+     * worth anything against: the expression field has to keep working
+     * exactly as it did. */
+    check('the expression field takes focus', await app.focusMain());
+    for (const label of ['x', '^', '3', '+', '1']) await app.tapKey(label);
+    check('the keypad types into the expression field',
+      await app.inputValue() === 'x^3+1', await app.inputValue());
+    check('and the parameter field stays empty',
+      await app.fieldValue('at') === '', await app.fieldValue('at'));
+
+    /* The bug in one line: with `at` focused, every tap landed in the
+     * expression above it — and took the caret with it. `at` is the whole
+     * point of substitute, and `=` and `,` are both keypad keys, so this is
+     * the field that cannot be typed any other way. */
+    check('the at field takes focus', await app.focusField('at'));
+    for (const label of ['x', '=', '2', ',']) await app.tapKey(label);
+    await app.tapTab('var');
+    await app.tapKey('y');
+    await app.tapTab('num');
+    for (const label of ['=', '3', '4']) await app.tapKey(label);
+    check('the keypad types into the focused parameter field',
+      await app.fieldValue('at') === 'x=2,y=34', await app.fieldValue('at'));
+    check('and leaves the expression field alone',
+      await app.inputValue() === 'x^3+1', await app.inputValue());
+
+    await app.tapBack();
+    check('backspace deletes from the focused field',
+      await app.fieldValue('at') === 'x=2,y=3', await app.fieldValue('at'));
+    check('and not from the expression field',
+      await app.inputValue() === 'x^3+1', await app.inputValue());
+
+    await app.tapKey('◀');
+    await app.tapKey('◀');
+    check('the caret keys move the caret inside the focused field',
+      await app.caretIn('at') === 5, JSON.stringify(await app.caretIn('at')));
+    await app.tapKey('▶');
+    await app.tapKey('▶');
+
+    /* The DOM value is only half of it. What gets computed is state.params,
+     * which the field's own `input` listener writes — so the keypad has to
+     * announce the edit rather than keep a second copy of that bookkeeping.
+     * x = 2 and y = 3 make this 6, and nothing else in the card carries a
+     * bare 6: the meta line echoes the binding text and the times are
+     * two-digit either side of a colon. */
+    await app.enter('x*y');
+    let card = await app.lastCard();
+    check('the tapped binding reaches the computation',
+      card && !card.failed && /\b6\b/.test(card.text), card?.text);
+
+    /* An op change rebuilds every parameter field, so what the keypad
+     * remembers has to be resolved fresh on each press — a held node would
+     * be typing into an input that is no longer in the page. Nothing is
+     * focused after the rebuild, so the expression is where this lands. */
+    await app.tapTab('op');
+    check('the derivative key selects it',
+      await app.tapKey('d/dx') && await app.currentOp() === 'derivative');
+    await app.tapTab('num');
+    await app.tapKey('7');
+    check('a rebuilt composer puts the keypad back on the expression',
+      await app.inputValue() === 'x*y7', await app.inputValue());
+
+    // Clearing it is also what gives the preview below an edge to be seen on.
+    for (let i = 0; i < 4; i += 1) await app.tapBack();
+    check('the expression field is empty', await app.inputValue() === '',
+      await app.inputValue());
+    await s.poll('document.getElementById("preview").textContent.trim() === ""',
+      'the preview to clear');
+
+    /* A `var` field holds a name, so the implicit `*` has no business in it:
+     * the same two taps that mean x·y in an expression mean the two-letter
+     * name here. */
+    check('the variable field takes focus', await app.focusField('variable'));
+    await app.tapTab('var');
+    await app.tapKey('y');
+    check('a name field gets no implicit multiplication',
+      await app.fieldValue('variable') === 'xy', await app.fieldValue('variable'));
+
+    await app.tapBack();
+    await app.tapBack();
+    check('backspace empties the name field',
+      await app.fieldValue('variable') === '', await app.fieldValue('variable'));
+    await app.tapKey('y');
+    check('the variable field holds the tapped name',
+      await app.fieldValue('variable') === 'y', await app.fieldValue('variable'));
+
+    check('the expression field takes focus back', await app.focusMain());
+    await app.tapTab('num');
+    await app.tapKey('x');
+    await app.tapTab('var');
+    await app.tapKey('y');
+    check('the expression field still gets the implicit multiplication',
+      await app.inputValue() === 'x*y', await app.inputValue());
+
+    /* Every op with a variable gets one suggested from the preview, and only
+     * `varTouched` stops it — which is set by the field's own `input`
+     * listener and by nothing else. Without the keypad dispatching that
+     * event, the next preview quietly puts `x` back. */
+    await s.poll('!document.getElementById("preview").classList.contains("preview--stale")'
+      + ' && document.getElementById("preview").textContent.trim() !== ""',
+      'the preview to render');
+    check('the tapped variable survives the preview’s suggestion',
+      await app.fieldValue('variable') === 'y', await app.fieldValue('variable'));
+
+    const before = await s.eval('document.querySelectorAll(".card").length');
+    await app.tapTab('num');
+    await app.tapKey('⏎');
+    await s.poll(`document.querySelectorAll(".card").length > ${before}`, 'a new card', 60000);
+    card = await app.lastCard();
+    check('the enter key still submits', card && !card.failed, card?.text);
+    check('the derivative is taken in the tapped variable',
+      await app.lastResult() === 'x', await app.lastResult());
+
+    /* Our keypad only replaces the phone's keyboard if that keyboard stays
+     * down, which is inputmode="none" and nothing else. renderParams() has
+     * rebuilt this field several times since the page loaded, so the field
+     * asking for it once at startup would not be enough. */
+    const inputmode = (id) => s.eval(`document.getElementById('${id}').getAttribute('inputmode')`);
+    check('a rebuilt parameter field still refuses the system keyboard',
+      await inputmode('f-variable') === 'none', await inputmode('f-variable'));
+
+    await app.tapTab('var');
+    check('the phone-keyboard key is there', await app.tapKey('abc — phone keyboard'));
+    check('the parameter field hands the system keyboard back',
+      await inputmode('f-variable') === 'text', await inputmode('f-variable'));
+    check('and so does the expression field',
+      await inputmode('input') === 'text', await inputmode('input'));
+
+    await s.eval('document.getElementById("kswitchBtn").click()');
+    check('switching back takes it away again',
+      await inputmode('f-variable') === 'none', await inputmode('f-variable'));
 
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },
@@ -1131,6 +1334,14 @@ async function main() {
     await s.send('Runtime.enable');
     await s.send('Log.enable');
     await s.send('Page.enable');
+    /* A headless page is never the window the OS considers focused, and Chrome
+     * withholds focus events from a document that isn't: `.focus()` still moves
+     * activeElement, but no focus, focusin or blur is ever delivered. Anything
+     * the app hangs off focus — the keypad following the caret from field to
+     * field, most of all — would then be untestable from here, and worse,
+     * would look like it worked while never running at all. This is the same
+     * switch Puppeteer throws for page.focus(). */
+    await s.send('Emulation.setFocusEmulationEnabled', { enabled: true });
     const app = makeApp(s);
 
     for (const [name, run] of Object.entries(groups)) {
