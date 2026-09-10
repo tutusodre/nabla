@@ -392,6 +392,21 @@ const GROUPS = {
     check('bare names still mean variables, not units',
       card && !card.failed && /\b5\b/.test(card.text), card?.text);
 
+    /* `min` was an alias for the minute, and unit aliases are in scope on the
+     * right of a binding — so min(1, 2) called a Quantity there and came back
+     * as "can't multiply sequence by non-int of type 'Quantity'". The alias is
+     * gone. Three to the fifth is 243, and the digit count is the point twice
+     * over: the binding is echoed in the card's own meta line, so a one-digit
+     * answer would be answered by the echo of `min(3, 5)` itself, and
+     * `formatTime` renders two digits either side of a colon, so no clock can
+     * hand over three adjacent ones. 3125 would mean min picked the larger. */
+    await app.setField('at', 'x = min(3, 5)');
+    await app.enter('x^5');
+    card = await app.lastCard();
+    check('min is a function again, not a minute',
+      card && !card.failed && /\b243\b/.test(card.text)
+        && !/Quantity|sequence/i.test(card.text), card?.text);
+
     /* Everything below runs with the unit namespace already built, which is
      * the state that used to break these: a result that is not an ordinary
      * expression has no coefficient to split and no atoms to scan. Order

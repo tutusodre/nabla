@@ -481,13 +481,16 @@ _UNIT_ALIASES = {
     "K": "kelvin", "mol": "mole", "cd": "candela", "N": "newton", "J": "joule",
     "W": "watt", "V": "volt", "C": "coulomb", "F": "farad", "H": "henry",
     "S": "siemens", "T": "tesla", "Wb": "weber", "Pa": "pascal", "Hz": "hertz",
-    "rad": "radian", "L": "liter", "min": "minute", "h": "hour",
+    "rad": "radian", "L": "liter", "h": "hour",
     "Ω": "ohm", "Ohm": "ohm",
 }
 
-# `min` is the one alias that shadows a function rather than a variable, and
-# only inside a binding: `t = 90 min` is worth far more there than min(a, b),
-# which is still spelled Min(a, b) — and still min() everywhere else.
+# No `min` alias, deliberately. Every other alias shadows an ordinary variable;
+# `min` would shadow a function, and inside a binding it did — `x = min(1, 2)`
+# read as a call on a Quantity and came back as "can't multiply sequence by
+# non-int of type 'Quantity'", a Python sentence about a Python type. `minute`
+# is still spelled out on the right of a binding, `h` still means an hour, and
+# `min(a, b)` keeps working everywhere.
 
 # Powers of ten, not floats: `1 km` has to stay 1000*meter rather than
 # 1000.0*meter and drag a decimal point through every exact result.
@@ -501,8 +504,8 @@ _PREFIXES = {
 # second list: kHz, mA and km are all written with the alias.
 _PREFIXED_LONG = ("ohm",)
 
-# kg already carries its prefix, and nobody writes kmin or mh.
-_NO_PREFIX = {"kg", "min", "h"}
+# kg already carries its prefix, and nobody writes mh.
+_NO_PREFIX = {"kg", "h"}
 
 
 def _unit_names():
