@@ -69,6 +69,7 @@ src/pyodide-pin.js    the Pyodide version, shared by both workers
 src/app.js            UI, state, history, charts
 src/style.css         design tokens and layout
 tools/make-icons.mjs  dependency-free PNG icon generator
+tools/smoke.mjs       dependency-free smoke tests, driven through headless Chrome
 ```
 
 **Two cache generations, deliberately separate.** `VERSION` names the shell
@@ -154,8 +155,8 @@ shed and the write retried.
 - Plot takes up to four comma-separated functions; commas inside a call like
   `log(x, 2)` are handled.
 - `ans` is the last single-expression result — derivative, integral, limit,
-  simplify or substitute. Solve is excluded because "the answer" is ambiguous
-  with several roots, and plots and tables are not single values.
+  series, simplify or substitute. Solve is excluded because "the answer" is
+  ambiguous with several roots, and plots and tables are not single values.
 - Units are understood on the right-hand side of a substitute binding —
   `a = 9.81 m/s^2` — and nowhere else. That is deliberate: it keeps `m`, `s`
   and `N` usable as ordinary variables in the expression itself. Mismatched
@@ -171,9 +172,31 @@ shed and the write retried.
   `h` and `G` as ordinary variables. The elementary charge is `q_e`, not `e`:
   `e` is Euler's number, and reassigning it would change the meaning of every
   `e^x` already written.
+  The converse is worth knowing too: inside a substitute an *unbound* one of
+  these names is the physical value, whether it came from the expression or
+  from a binding. `x^2 + c` at `x = 2` is a dimension error rather than
+  `4 + c`, because a velocity cannot be added to a number, and `a = 2c` binds
+  `a` to `599584916 m/s`. Bind the name if you meant a variable.
   The constants are a namespace of their own, not part of the unit one, so on
   the right of a binding `h` is still an hour and `g` still a gram —
-  `m = 500 g` with `m*g` is `4.903325 N`.
+  `m = 500 g` with `m*g` is `4.903325 N`. `c` has no unit meaning, so there it
+  keeps the physical one.
+
+## Tests
+
+```sh
+node tools/smoke.mjs          # every group
+node tools/smoke.mjs units    # one group
+```
+
+No dependencies and no test framework: the script serves the repo, launches
+headless Chrome and drives it over the DevTools protocol, asserting against the
+real app. The service worker, the Pyodide worker and the keypad only exist in a
+browser, so that is where they get tested. Chrome has to be on `PATH` —
+`google-chrome`, `chromium` or one of their variants. First run pays for the
+Pyodide download; the exit code is non-zero if anything fails.
+
+Groups: `boot`, `nav`, `substitute`, `units`, `ans`, `series`, `constants`.
 
 ## Regenerating icons
 
