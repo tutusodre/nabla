@@ -13,6 +13,7 @@
   const MAX_STORED_POINTS = 220;
   const PREVIEW_DELAY = 180;
   const ABORT_AFTER = 2500;
+  const SW_WAIT = 3000;
 
   // ---------------------------------------------------------- operations --
 
@@ -242,9 +243,18 @@
     pending.clear();
     if (worker) worker.terminate();
     state.ready = false;
-    el.bootStatus.textContent = t('boot.restarting');
-    el.bootBar.style.width = '10%';
+    // Terminating drops the whole Python runtime, so this is a full reboot —
+    // several seconds. Without the overlay back the app just sits there with a
+    // dead submit button and no sign that anything is happening.
+    showBoot(t('boot.restarting'), 0.1);
     startWorker();
+  }
+
+  function showBoot(message, progress) {
+    el.boot.classList.remove('boot--failed');
+    el.boot.hidden = false;
+    el.bootStatus.textContent = message;
+    el.bootBar.style.width = `${Math.round((progress || 0) * 100)}%`;
   }
 
   function hideBoot() {
@@ -1445,14 +1455,35 @@
     }
 
     updateGo();
-    startWorker();
 
     const secure = location.protocol === 'https:' ||
       ['localhost', '127.0.0.1'].includes(location.hostname);
     if (secure && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./service-worker.js', { updateViaCache: 'none' })
-        .catch(() => { /* caching is a bonus, not a requirement */ });
+      bootBehindServiceWorker();
+    } else {
+      startWorker();
     }
+  }
+
+  /* The compute worker pulls ~25 MB of Pyodide and SymPy, and those requests
+   * are only cached if a service worker is already controlling this page. Start
+   * the download first and a first visit pays for it twice: once now, once on
+   * the next launch. So wait for the controller — but never longer than
+   * SW_WAIT, because a registration that never settles must not hold the app
+   * hostage. Repeat visits already have a controller and don't wait at all. */
+  async function bootBehindServiceWorker() {
+    try {
+      await navigator.serviceWorker.register('./service-worker.js', { updateViaCache: 'none' });
+      if (!navigator.serviceWorker.controller) {
+        await Promise.race([
+          new Promise((resolve) => {
+            navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true });
+          }),
+          new Promise((resolve) => { setTimeout(resolve, SW_WAIT); }),
+        ]);
+      }
+    } catch (err) { /* caching is a bonus, not a requirement */ }
+    startWorker();
   }
 
   if (document.readyState === 'loading') {

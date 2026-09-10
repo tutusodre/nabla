@@ -4,10 +4,10 @@
  * seconds and would otherwise freeze scrolling, the theme toggle, everything.
  */
 
-const PYODIDE_VERSION = 'v0.26.4';
-const PYODIDE_BASE = `https://cdn.jsdelivr.net/pyodide/${PYODIDE_VERSION}/full/`;
-
-importScripts(`${PYODIDE_BASE}pyodide.js`);
+/* Sets self.PYODIDE_BASE — shared with the service worker so the URL fetched
+ * here and the URL warmed there cannot drift apart. */
+importScripts('./pyodide-pin.js');
+importScripts(`${self.PYODIDE_BASE}pyodide.js`);
 
 let compute = null;
 let language = 'en';
@@ -18,7 +18,7 @@ function post(message) {
 
 async function boot() {
   post({ type: 'status', progress: 0.05, key: 'boot.runtime' });
-  const pyodide = await loadPyodide({ indexURL: PYODIDE_BASE });
+  const pyodide = await loadPyodide({ indexURL: self.PYODIDE_BASE });
 
   post({ type: 'status', progress: 0.35, key: 'boot.packages' });
   await pyodide.loadPackage(['sympy', 'numpy']);

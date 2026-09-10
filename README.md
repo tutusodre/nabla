@@ -65,10 +65,34 @@ service-worker.js     network-first shell, cache-first vendor payload
 icons/                generated — see tools/make-icons.mjs
 src/math.py           SymPy kernel; every op returns JSON, never raises
 src/worker.js         Pyodide host
+src/pyodide-pin.js    the Pyodide version, shared by both workers
 src/app.js            UI, state, history, charts
 src/style.css         design tokens and layout
 tools/make-icons.mjs  dependency-free PNG icon generator
 ```
+
+**Two cache generations, deliberately separate.** `VERSION` names the shell
+cache and moves on every deploy; `VENDOR_VERSION` names the jsdelivr cache and
+moves only when a pinned URL does. Tying them together would mean every CSS
+tweak evicted ~25 MB of Pyodide and SymPy and re-downloaded all of it — the
+vendor URLs are immutable, so that cache is meant to outlive deploys.
+
+**The page waits for its service worker on a first visit.** Pyodide is only
+cached if a worker is already controlling the page, so starting the download
+first would make a first visit pay for it twice. `app.js` registers, waits for
+`controllerchange`, then starts the compute worker — capped at `SW_WAIT`, since
+a registration that never settles must not hold the app hostage. Repeat visits
+already have a controller and don't wait.
+
+**Every pinned URL carries an integrity hash**, and the Pyodide version lives in
+one file both workers `importScripts()`. Two copies of that string would drift
+silently: the cache would warm a build nothing requests, and offline boots would
+stop working with nothing to show for it.
+
+**Network reads give up after 3 s when there's a cached fallback.** A captive
+portal or a lie-fi connection leaves `fetch()` hanging far longer than the cache
+takes to answer. With nothing cached there's no timeout — a slow answer still
+beats no answer.
 
 **SymPy runs in a web worker.** A hard `integrate()` can block for seconds; on
 the main thread that would freeze scrolling and every control on the page — the
