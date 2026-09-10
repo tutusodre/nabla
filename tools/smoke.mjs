@@ -314,6 +314,59 @@ const GROUPS = {
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },
 
+  units: async (s, app) => {
+    await s.open(APP);
+    await app.boot();
+    await app.tapTab('op');
+    await app.tapKey('x = a');
+
+    await app.setField('at', 'a = 9.81 m/s^2, t = 3 s');
+    await app.enter('a*t');
+    let card = await app.lastCard();
+    check('units multiply through',
+      card && !card.failed && /29\.4/.test(card.text) && /m\/s|meter/.test(card.text), card?.text);
+
+    /* The stored answer reads "29.43*meter/second". Reused, it has to come
+     * back as that — the ordinary parser would shred the long spellings into
+     * m*e*t*e*r over s*e*c*o*n*d and answer with a different number. */
+    await app.enter('ans*2');
+    card = await app.lastCard();
+    check('a unit answer survives ans',
+      card && !card.failed && /58\.86/.test(card.text), card?.text);
+
+    /* 90 km/h can only come out as 25 m/s if km and h were read as units — as
+     * ordinary symbols this stays 90*k*m/h and nothing folds. The card echoes
+     * the binding text verbatim, so an assertion that only looks for "m/s"
+     * would pass without any of this working. */
+    await app.setField('at', 'v = 90 km/h');
+    await app.enter('v');
+    card = await app.lastCard();
+    check('mixed units normalise to SI',
+      card && !card.failed && /25\s*m/.test(card.text), card?.text);
+
+    await app.setField('at', 'v = 3 m/s, a = 2 m/s^2');
+    await app.enter('v + a');
+    card = await app.lastCard();
+    check('a dimension mismatch is caught', card && card.failed, card?.text);
+
+    /* `i`, not `I`: the imaginary unit is reserved, which is exactly why the
+     * app keeps lowercase i free for a current. Ohm times ampere has to come
+     * back as a volt — a stray-symbol product could not. */
+    await app.setField('at', 'R = 4.7 kohm, i = 2 mA');
+    await app.enter('R*i');
+    card = await app.lastCard();
+    check('prefixes and ohm work',
+      card && !card.failed && /9\.4/.test(card.text) && /V/.test(card.text), card?.text);
+
+    await app.setField('at', 'm = 2, s = 3');
+    await app.enter('m + s');
+    card = await app.lastCard();
+    check('bare names still mean variables, not units',
+      card && !card.failed && /\b5\b/.test(card.text), card?.text);
+
+    check('no console errors', s.errors.length === 0, s.errors.join(' | '));
+  },
+
   ans: async (s, app) => {
     await s.open(APP);
     await app.boot();

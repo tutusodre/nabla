@@ -156,6 +156,13 @@ shed and the write retried.
 - `ans` is the last single-expression result — derivative, integral, limit,
   simplify or substitute. Solve is excluded because "the answer" is ambiguous
   with several roots, and plots and tables are not single values.
+- Units are understood on the right-hand side of a substitute binding —
+  `a = 9.81 m/s^2` — and nowhere else. That is deliberate: it keeps `m`, `s`
+  and `N` usable as ordinary variables in the expression itself. Mismatched
+  dimensions are an error rather than a silent number.
+  SI prefixes come along (`4.7 kohm`, `2 mA`, `2.4 GHz`), and the answer is
+  folded back to SI: `90 km/h` reads as `25 m/s`, `4.7 kohm · 2 mA` as
+  `9.4 V`, with the unfolded form kept as an alternate.
 
 ## Regenerating icons
 

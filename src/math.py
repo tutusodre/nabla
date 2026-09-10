@@ -189,6 +189,12 @@ MESSAGES = {
             "O lado esquerdo do “=” tem que ser um nome de variável.",
         "“%s” has no value after the “=”.": "“%s” não tem valor depois do “=”.",
         "“%s” is given a value twice.": "“%s” recebeu valor duas vezes.",
+        "Those units don’t match up — %s": "Essas unidades não batem — %s",
+        "Those units don’t match up — the terms being added aren’t "
+        "the same kind of quantity.":
+            "Essas unidades não batem — os termos somados não são o mesmo "
+            "tipo de grandeza.",
+        "as written": "como escrito",
         # worked-step labels
         "Constant": "Constante",
         "Constant multiple": "Múltiplo constante",
@@ -348,6 +354,173 @@ def _parse_float(src, label):
     if not np.isfinite(out):
         raise MathError("%s must be finite.", _t(label))
     return out
+
+
+# --------------------------------------------------------------------------
+# units — in scope on the right of a binding, and nowhere else
+# --------------------------------------------------------------------------
+#
+# The expression parser multiplies implicitly and treats m, s, N, K, c and k as
+# ordinary variables, which is what makes `2m` and `kx` work at all. Unit names
+# would collide with every one of them, so they are layered over LOCALS only
+# when a binding's value is read — never when the expression itself is parsed.
+
+_UNIT_CACHE = {}
+
+# An explicit allowlist, not a star-import: these names shadow ordinary
+# variables inside a binding's right-hand side, so the set stays reviewable.
+_UNIT_NAMES = (
+    "meter second kilogram gram ampere kelvin mole candela "
+    "newton joule watt volt coulomb farad henry ohm siemens tesla weber "
+    "pascal hertz radian degree liter minute hour day"
+).split()
+
+_UNIT_ALIASES = {
+    "m": "meter", "s": "second", "kg": "kilogram", "g": "gram", "A": "ampere",
+    "K": "kelvin", "mol": "mole", "cd": "candela", "N": "newton", "J": "joule",
+    "W": "watt", "V": "volt", "C": "coulomb", "F": "farad", "H": "henry",
+    "S": "siemens", "T": "tesla", "Wb": "weber", "Pa": "pascal", "Hz": "hertz",
+    "rad": "radian", "L": "liter", "min": "minute", "h": "hour",
+    "Ω": "ohm", "Ohm": "ohm",
+}
+
+# `min` is the one alias that shadows a function rather than a variable, and
+# only inside a binding: `t = 90 min` is worth far more there than min(a, b),
+# which is still spelled Min(a, b) — and still min() everywhere else.
+
+# Powers of ten, not floats: `1 km` has to stay 1000*meter rather than
+# 1000.0*meter and drag a decimal point through every exact result.
+_PREFIXES = {
+    "T": 12, "G": 9, "M": 6, "k": 3, "d": -1, "c": -2,
+    "m": -3, "u": -6, "µ": -6, "μ": -6, "n": -9, "p": -12,
+}
+
+# Prefixed spellings are built over the short aliases — "mmeter" is not a word —
+# plus the long names people really do prefix. `kohm` is the whole of that
+# second list: kHz, mA and km are all written with the alias.
+_PREFIXED_LONG = ("ohm",)
+
+# kg already carries its prefix, and nobody writes kmin or mh.
+_NO_PREFIX = {"kg", "min", "h"}
+
+
+def _unit_names():
+    """Unit names, aliases and prefixed spellings. Built once, on first use."""
+    if _UNIT_CACHE:
+        return _UNIT_CACHE
+
+    # Imported here rather than at module scope: boot time is a headline
+    # property of this app and most sessions never bind a unit.
+    from sympy.physics import units as u
+
+    # No default on the getattr, deliberately. A name SymPy has moved has to
+    # fail loudly: a unit that quietly went missing would leave `4.7 kohm` to
+    # be shredded into stray symbols and answered with a plausible number.
+    base = {name: getattr(u, name) for name in _UNIT_NAMES}
+    for alias, name in _UNIT_ALIASES.items():
+        base[alias] = base[name]
+
+    prefixed = {}
+    for spelling in list(_UNIT_ALIASES) + list(_PREFIXED_LONG):
+        if spelling in _NO_PREFIX:
+            continue
+        for prefix, power in _PREFIXES.items():
+            prefixed.setdefault(
+                prefix + spelling, sp.Integer(10) ** power * base[spelling]
+            )
+
+    _UNIT_CACHE.update(prefixed)
+    _UNIT_CACHE.update(base)  # unprefixed wins on any collision
+    return _UNIT_CACHE
+
+
+# A value with no letter in it cannot name a unit, so `x = 2` skips the unit
+# namespace — and the import behind it — entirely.
+_HAS_LETTER_RE = re.compile(r"[^\W\d_]")
+
+
+def _parse_quantity(text):
+    """Parse a binding's right-hand side, where unit names are in scope."""
+    if not _HAS_LETTER_RE.search(text or ""):
+        return _parse(text)
+    return _parse(text, extra=_unit_names())
+
+
+_LONG_UNIT_RE = re.compile(r"\b(?:%s)\b" % "|".join(_UNIT_NAMES))
+
+
+def _parse_answer(text):
+    """Re-read a stored result, which may have carried units out of substitute.
+
+    Only the long spellings are in scope: a printed Quantity always says
+    "meter", never "m", so `ans` round-trips without `m` meaning a metre
+    anywhere. Left to the ordinary parser, "29.43*meter/second" would be
+    shredded into m*e*t*e*r over s*e*c*o*n*d — visible nonsense, but nonsense
+    the user never asked for.
+    """
+    if not _LONG_UNIT_RE.search(text or ""):
+        return _parse(text)
+    names = _unit_names()
+    return _parse(text, extra={name: names[name] for name in _UNIT_NAMES})
+
+
+_DIMENSION_RE = re.compile(r"Dimension\(([^()]*)\)")
+
+
+def _unit_mismatch(exc):
+    """SymPy's dimension complaint, without the Dimension(...) wrapping."""
+    return _DIMENSION_RE.sub(r"\1", str(exc)).strip().rstrip(".")
+
+
+def _has_units(expr):
+    from sympy.physics.units import Quantity
+
+    return bool(expr.atoms(Quantity))
+
+
+def _check_dimensions(expr):
+    """Raise a MathError when the units in `expr` disagree.
+
+    Catching this is the whole point of the feature: adding a velocity to an
+    acceleration has to be an error, not a number that looks plausible.
+    """
+    from sympy.physics.units.systems.si import SI
+    from sympy.physics.units.util import check_dimensions
+
+    if expr.free_symbols:
+        # An unbound symbol could carry any dimension, so the strict check
+        # below would call `x + 2 m` a mismatch. This one is the lenient
+        # version: it only objects when the unit-bearing terms already
+        # disagree among themselves. Its message is a dump of Dimension
+        # objects, so none of it is worth passing on.
+        try:
+            check_dimensions(expr)
+        except ValueError:
+            raise MathError(
+                "Those units don’t match up — the terms being added aren’t "
+                "the same kind of quantity."
+            )
+        return
+
+    # Private, and the only API that both checks and explains itself: it names
+    # the offending term and both dimensions.
+    try:
+        SI._collect_factor_and_dimension(expr)
+    except ValueError as exc:
+        raise MathError("Those units don’t match up — %s", _unit_mismatch(exc))
+
+
+def _to_si(expr):
+    """Fold units together: ohm*ampere -> volt, meter/hour -> meter/second."""
+    from sympy.physics.units.systems.si import SI
+    from sympy.physics.units.util import quantity_simplify
+
+    try:
+        return quantity_simplify(expr, across_dimensions=True, unit_system=SI)
+    except Exception:
+        # Normalising is a courtesy — the substitution already answered the
+        # question, and its dimensions were checked before we got here.
+        return expr
 
 
 # --------------------------------------------------------------------------
@@ -904,16 +1077,30 @@ def op_simplify(source=""):
 
 def op_substitute(source="", at=""):
     expr = _parse(source)
-    pairs = _bindings(at)
+    pairs = _bindings(at, parse_value=_parse_quantity)
 
     # simultaneous keeps `x = y, y = x` a swap rather than a cascade.
     result = expr.subs(pairs, simultaneous=True)
-    simplified = _try_simplify(result)
+    # An empty cache means no binding in this session ever looked a unit up, so
+    # there is no Quantity to find and the whole unit path can be skipped.
+    has_units = bool(_UNIT_CACHE) and _has_units(result)
+
+    if has_units:
+        _check_dimensions(result)
+        simplified = _to_si(result)
+    else:
+        simplified = _try_simplify(result)
 
     alternates = []
     decimal = _approx(simplified)
     if decimal and decimal != _text(simplified):
         alternates.append({"label": _t("decimal"), "latex": decimal, "text": decimal})
+    if has_units:
+        # The raw substitution, when normalising moved it: 9.4*ampere*ohm
+        # beside 9.4*volt says more than either does alone.
+        entry = _alternate("as written", result, simplified)
+        if entry:
+            alternates.append(entry)
 
     given = r",\; ".join("%s = %s" % (_latex(sym), _latex(val)) for sym, val in pairs)
     return {
@@ -1151,7 +1338,7 @@ def compute(op, args_json, lang="en"):
         previous = args.pop("ans", None)
         # Parsed inside this try on purpose: a malformed stored answer becomes
         # an ordinary translated error instead of crashing the worker.
-        LAST_ANS = _parse(previous) if previous else None
+        LAST_ANS = _parse_answer(previous) if previous else None
         return json.dumps({"ok": True, "data": handler(**args)})
     except Exception as exc:  # noqa: BLE001 — every failure must reach the user
         return json.dumps({"ok": False, "error": _friendly(exc)})
