@@ -63,6 +63,18 @@
       meta: (p) => t('meta.limit', p.variable, p.point) +
         (p.direction === '+-' ? '' : t(p.direction === '+' ? 'meta.fromRight' : 'meta.fromLeft')),
     },
+    series: {
+      labelKey: 'op.series',
+      chip: 'series',
+      chipKey: 'op.series',
+      placeholder: 'sin(x)',
+      fields: [
+        { name: 'variable', labelKey: 'field.wrt', kind: 'var', value: 'x' },
+        { name: 'about', labelKey: 'field.about', kind: 'text', value: '0' },
+        { name: 'order', labelKey: 'field.terms', kind: 'int', value: '6' },
+      ],
+      meta: (params) => `${params.variable} → ${params.about}`,
+    },
     simplify: {
       labelKey: 'op.simplify',
       chipKey: 'chip.simplify',
@@ -113,7 +125,7 @@
     },
   };
 
-  const OP_ORDER = ['derivative', 'integral', 'limit', 'simplify', 'substitute', 'solve', 'plot', 'table'];
+  const OP_ORDER = ['derivative', 'integral', 'limit', 'series', 'simplify', 'substitute', 'solve', 'plot', 'table'];
 
   /* Ops whose result is a single expression, so it can be reused as `ans`.
    * solve is out because "the answer" is ambiguous with several roots;
@@ -132,7 +144,7 @@
         ['d/dx', { act: 'op', op: 'derivative' }],
         ['∫', { act: 'op', op: 'integral' }],
         ['lim', { act: 'op', op: 'limit' }],
-        [null, null],
+        ['series', { act: 'op', op: 'series' }],
         ['simplify', { act: 'op', op: 'simplify' }],
         ['solve', { act: 'op', op: 'solve' }],
         ['x = a', { act: 'op', op: 'substitute' }],

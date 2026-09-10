@@ -339,6 +339,33 @@ const GROUPS = {
 
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },
+
+  series: async (s, app) => {
+    await s.open(APP);
+    await app.boot();
+    await app.tapTab('op');
+    check('series key selects it',
+      await app.tapKey('series') && await app.currentOp() === 'series');
+
+    await app.enter('sin(x)');
+    let card = await app.lastCard();
+    check('expansion has the leading terms',
+      card && !card.failed && /x/.test(card.text) && /6/.test(card.text), card?.text);
+    check('the O term is shown', card && /O\(/.test(card.text), card?.text);
+
+    await app.setField('about', '1');
+    await app.enter('log(x)');
+    card = await app.lastCard();
+    check('expansion about a point works', card && !card.failed, card?.text);
+
+    await app.setField('about', '0');
+    await app.setField('order', 'x');
+    await app.enter('sin(x)');
+    card = await app.lastCard();
+    check('a non-numeric order is caught', card && card.failed, card?.text);
+
+    check('no console errors', s.errors.length === 0, s.errors.join(' | '));
+  },
 };
 
 async function main() {

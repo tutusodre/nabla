@@ -133,6 +133,11 @@ MESSAGES = {
             "Sem forma fechada — calculada numericamente.",
         "SymPy couldn’t determine that limit.":
             "O SymPy não conseguiu determinar esse limite.",
+        "Terms": "Termos",
+        "Terms has to be between 1 and 20.": "Termos tem que ser entre 1 e 20.",
+        "SymPy couldn’t expand that here — try another point.":
+            "O SymPy não conseguiu expandir aqui — tente outro ponto.",
+        "without the O term": "sem o termo O",
         "SymPy couldn’t solve that symbolically.":
             "O SymPy não conseguiu resolver isso simbolicamente.",
         "No real solutions — turn on “complex” to see the %d complex root(s).":
@@ -840,6 +845,33 @@ def op_limit(source="", variable="x", point="0", direction="+-"):
     return {"statement": statement, "alternates": alternates, **_fmt(result)}
 
 
+def op_series(source="", variable="x", about="0", order="6"):
+    expr = _parse(source)
+    var = _sym(variable)
+    point = _parse_point(about)
+
+    count = int(_parse_float(order, "Terms"))
+    if count < 1 or count > 20:
+        raise MathError("Terms has to be between 1 and 20.")
+
+    try:
+        expansion = sp.series(expr, var, point, count)
+    except (NotImplementedError, sp.PoleError):
+        raise MathError("SymPy couldn’t expand that here — try another point.")
+
+    truncated = expansion.removeO()
+    alternates = []
+    entry = _alternate("without the O term", truncated, expansion)
+    if entry:
+        alternates.append(entry)
+
+    return {
+        "statement": r"%s,\quad %s \to %s" % (_latex(expr), _latex(var), _latex(point)),
+        "alternates": alternates,
+        **_fmt(expansion),
+    }
+
+
 def op_simplify(source=""):
     expr = _parse_equation(source)
     simplified = _try_simplify(expr)
@@ -1062,6 +1094,7 @@ OPERATIONS = {
     "derivative": op_derivative,
     "integral": op_integral,
     "limit": op_limit,
+    "series": op_series,
     "simplify": op_simplify,
     "substitute": op_substitute,
     "solve": op_solve,
