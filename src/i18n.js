@@ -49,6 +49,7 @@
       'op.plot': 'Plot',
       'op.table': 'Table',
 
+      'chip.series': 'series',
       'chip.simplify': 'simplify',
       'chip.solve': 'solve',
       'chip.plot': 'plot',
@@ -171,6 +172,7 @@
       'op.plot': 'Gráfico',
       'op.table': 'Tabela',
 
+      'chip.series': 'série',
       'chip.simplify': 'simplificar',
       'chip.solve': 'resolver',
       'chip.plot': 'gráfico',

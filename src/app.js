@@ -65,7 +65,7 @@
     },
     series: {
       labelKey: 'op.series',
-      chip: 'series',
+      chipKey: 'chip.series',
       placeholder: 'sin(x)',
       fields: [
         { name: 'variable', labelKey: 'field.wrt', kind: 'var', value: 'x' },

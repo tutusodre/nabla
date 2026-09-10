@@ -507,14 +507,16 @@ const GROUPS = {
       card && !card.failed && /89875517873681764/.test(card.text), card?.text);
 
     /* The rule that keeps `c` usable as a constant of integration: a name you
-     * bind yourself is yours. Two times three cubed is fifty-four — cubed, and
-     * not squared, because every card carries a 2-digit clock and the 18 this
-     * used to look for matched the minutes at :18 whatever the answer was. */
+     * bind yourself is yours. Two times three to the fourth is 162, and the
+     * digit count is the point: `formatTime` renders 2-digit hours and
+     * 2-digit minutes around a colon, so no clock can hand over three
+     * adjacent digits. Both 18 and 54 could, and did — 03:18 and 03:54 each
+     * passed this assertion with the rule broken. */
     await app.setField('at', 'm = 2, c = 3');
-    await app.enter('m*c^3');
+    await app.enter('m*c^4');
     card = await app.lastCard();
     check('a binding beats the physical value',
-      card && !card.failed && /\b54\b/.test(card.text), card?.text);
+      card && !card.failed && /\b162\b/.test(card.text), card?.text);
 
     /* SymPy has no named SI unit for what k_B measures, so folding leaves it
      * alone — the answer still has to be a number rather than "k_B". */
