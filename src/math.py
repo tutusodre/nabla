@@ -200,6 +200,8 @@ MESSAGES = {
             "Esse passo se afasta do valor final.",
         "Can’t parse that — check your parentheses and operators.":
             "Não consegui interpretar — confira os parênteses e operadores.",
+        "That isn’t an expression — type something like “x^2 + 1”.":
+            "Isso não é uma expressão — digite algo como “x^2 + 1”.",
         "That divides by zero.": "Isso divide por zero.",
         "That expression nests too deeply.":
             "A expressão tem aninhamento demais.",
@@ -280,6 +282,32 @@ def _t(text):
 # parsing
 # --------------------------------------------------------------------------
 
+# `parse_expr` hands back whatever the text describes, and not all of it is an
+# expression: `[1, 2]` is a plain Python list, `{1, 2}` a FiniteSet, `1 < 2` a
+# Boolean. An op that assumes otherwise fails deep inside SymPy, and the failure
+# reaches the user naming a Python type they never typed — `'list' object has
+# no attribute 'subs'`. The two gates below say it in a sentence instead, at the
+# point the source is read. They differ only in how much they accept, because
+# the ops do: `substitute` has to keep answering `x > 1`, which is a Relational
+# and not an Expr, while a derivative or a limit needs the real thing.
+
+_NOT_AN_EXPRESSION = "That isn’t an expression — type something like “x^2 + 1”."
+
+
+def _expression(value):
+    """Insist on an expression — something with arithmetic to do."""
+    if not isinstance(value, sp.Expr):
+        raise MathError(_NOT_AN_EXPRESSION)
+    return value
+
+
+def _symbolic(value):
+    """Insist on something SymPy can walk: an Expr, an Eq, a comparison."""
+    if not isinstance(value, sp.Basic):
+        raise MathError(_NOT_AN_EXPRESSION)
+    return value
+
+
 def _parse(src, extra=None):
     text = (src or "").strip()
     if not text:
@@ -291,7 +319,18 @@ def _parse(src, extra=None):
         if LAST_ANS is None:
             raise MathError("Nothing to reuse yet — compute something first.")
         names = {**names, "ans": LAST_ANS}
-    expr = sp.sympify(parse_expr(text, local_dict=names, transformations=TRANSFORMS))
+    try:
+        parsed = parse_expr(text, local_dict=names, transformations=TRANSFORMS)
+    except TypeError:
+        # `parse_expr` evaluates what it builds, so a bare function name standing
+        # where a value belongs — `2 sin`, or `90 min` now that min is a function
+        # again and not a minute — gets past the syntax check and fails on the
+        # multiplication, as "unsupported operand type(s) for *: 'Integer' and
+        # 'FunctionClass'". The catch is bounded to this one call, where a
+        # TypeError can only mean the text combined things that do not combine;
+        # every op's own TypeErrors are still read by `_friendly`.
+        raise MathError(_NOT_AN_EXPRESSION)
+    expr = sp.sympify(parsed)
     # Units reach every other operation through `ans`, and "mismatched
     # dimensions are an error, not a silent number" is not substitute's promise
     # alone: `ans + 1` on 29.43 m/s has to fail here too.
@@ -1132,7 +1171,7 @@ def op_preview(source="", mode=""):
     if mode == "plot":
         parts = _split_top(source)
         if len(parts) > 1:
-            exprs = [_parse(p) for p in parts]
+            exprs = [_expression(_parse(p)) for p in parts]
             names = sorted({s.name for e in exprs for s in e.free_symbols})
             return {
                 "latex": r",\quad ".join(_latex(e) for e in exprs),
@@ -1144,7 +1183,7 @@ def op_preview(source="", mode=""):
 
 
 def op_derivative(source="", variable="x", order=1):
-    expr = _parse(source)
+    expr = _expression(_parse(source))
     var = _sym(variable)
     try:
         order = int(order)
@@ -1177,7 +1216,7 @@ def op_derivative(source="", variable="x", order=1):
 
 
 def op_integral(source="", variable="x", lower=None, upper=None):
-    expr = _parse(source)
+    expr = _expression(_parse(source))
     var = _sym(variable)
     definite = bool((lower or "").strip()) and bool((upper or "").strip())
 
@@ -1229,7 +1268,7 @@ def op_integral(source="", variable="x", lower=None, upper=None):
 
 
 def op_limit(source="", variable="x", point="0", direction="+-"):
-    expr = _parse(source)
+    expr = _expression(_parse(source))
     var = _sym(variable)
     target = _parse_point(point)
     if direction not in ("+", "-", "+-"):
@@ -1253,7 +1292,7 @@ def op_limit(source="", variable="x", point="0", direction="+-"):
 
 
 def op_series(source="", variable="x", about="0", order="6"):
-    expr = _parse(source)
+    expr = _expression(_parse(source))
     var = _sym(variable)
     point = _parse_point(about)
 
@@ -1310,7 +1349,9 @@ def op_simplify(source=""):
 
 
 def op_substitute(source="", at=""):
-    expr = _parse(source)
+    # `_symbolic`, not `_expression`: substituting into a comparison is a fair
+    # question — `x > 1` at `x = 2` is True — and a Relational is not an Expr.
+    expr = _symbolic(_parse(source))
     pairs = _bindings(at, parse_value=_parse_quantity)
 
     # simultaneous keeps `x = y, y = x` a swap rather than a cascade.
@@ -1366,7 +1407,9 @@ def op_substitute(source="", at=""):
 
 
 def op_solve(source="", variable="x", complex_roots=False):
-    parsed = _parse_equation(source)
+    # Same latitude as substitute: an inequality is something to solve, and
+    # `sp.Eq` sympifies its argument, so a list reaches it as a SympifyError.
+    parsed = _symbolic(_parse_equation(source))
     var = _sym(variable)
     equation = parsed if isinstance(parsed, sp.Eq) else sp.Eq(parsed, 0)
 
@@ -1430,7 +1473,7 @@ def op_plot(source="", x_min="-10", x_max="10", samples=700):
     series, pool = [], []
 
     for part in parts:
-        expr = _parse(part)
+        expr = _expression(_parse(part))
         free = sorted(expr.free_symbols, key=lambda s: s.name)
         if len(free) > 1:
             raise MathError(
@@ -1495,7 +1538,7 @@ def op_plot(source="", x_min="-10", x_max="10", samples=700):
 
 
 def op_table(source="", variable="x", start="-5", stop="5", step="1"):
-    expr = _parse(source)
+    expr = _expression(_parse(source))
     var = _sym(variable)
     begin = _parse_float(start, "Start")
     end = _parse_float(stop, "Stop")

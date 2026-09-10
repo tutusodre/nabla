@@ -311,6 +311,19 @@ const GROUPS = {
     check('a duplicate binding is caught', card && card.failed && /twice|duas/.test(card.text),
       card?.text);
 
+    /* parse_expr returns whatever the text describes, and `[1, 2]` is a plain
+     * Python list — substitute reaching for `.subs` on one used to answer with
+     * "'list' object has no attribute 'subs'". The absence of that vocabulary
+     * is as much the assertion as the failure: an error naming a Python type
+     * the user never typed is the module docstring's promise being broken, so
+     * the card has to fail, and fail in a sentence. */
+    await app.setField('at', 'x = 1');
+    await app.enter('[1, 2]');
+    card = await app.lastCard();
+    check('a non-expression source is refused in words',
+      card && card.failed && /isn.t an expression|não é uma expressão/.test(card.text)
+        && !/attribute|object/i.test(card.text), card?.text);
+
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },
 
