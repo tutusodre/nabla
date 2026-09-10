@@ -66,7 +66,6 @@
     series: {
       labelKey: 'op.series',
       chip: 'series',
-      chipKey: 'op.series',
       placeholder: 'sin(x)',
       fields: [
         { name: 'variable', labelKey: 'field.wrt', kind: 'var', value: 'x' },
@@ -129,8 +128,12 @@
 
   /* Ops whose result is a single expression, so it can be reused as `ans`.
    * solve is out because "the answer" is ambiguous with several roots;
-   * plot and table are out because they aren't scalars. */
-  const ANS_OPS = new Set(['derivative', 'integral', 'limit', 'simplify', 'substitute']);
+   * plot and table are out because they aren't scalars. A series belongs
+   * here despite the O(...) term: the printed form re-parses, so d/dx of a
+   * stored expansion differentiates the O term along with everything else. */
+  const ANS_OPS = new Set([
+    'derivative', 'integral', 'limit', 'series', 'simplify', 'substitute',
+  ]);
 
   /* Keypad pages. A key is [label, spec]: a plain string inserts literally,
    * {fn} inserts `name()` with the caret inside, {act} runs an action. */
@@ -576,6 +579,9 @@
     el.keypadPages.querySelectorAll('.kgrid').forEach((grid) => {
       grid.hidden = grid.dataset.page !== id;
     });
+    // Pages differ in row count, so the dock the toast has to clear just
+    // changed height — 212px on the ops page against 368px on the names one.
+    syncDockHeight();
   }
 
   function setKeypadOpen(open) {

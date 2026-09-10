@@ -652,7 +652,11 @@ code {
   gap: 6px 12px;
   padding-bottom: 8px;
 }
-.params:empty { display: none; }
+/* The op button is a child of .params even where it is hidden, so :empty
+   never matches. On desktop the ops live on the chips and the button is gone,
+   which leaves the one fields-less op — simplify — with nothing but this
+   row's padding. Collapse it there rather than show an 8px band. */
+.composer[data-nav="chips"] .params:not(:has(.field)) { display: none; }
 
 .field { display: flex; align-items: center; gap: 6px; }
 .field__label {
