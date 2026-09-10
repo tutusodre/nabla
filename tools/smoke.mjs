@@ -413,6 +413,18 @@ const GROUPS = {
     check('units carried by ans are checked in other ops',
       card && card.failed, card?.text);
 
+    /* A comparison has no factor and dimension of its own, and SymPy does not
+     * go looking: `_collect_factor_and_dimension` hands back Dimension(1) for
+     * any Relational without reading it, so comparing a velocity to a bare
+     * number came back as a plain True. A failed card is only half of it —
+     * `!/True/` is the other half, because True is exactly what the bug
+     * produced. The previous card failed, and a failed card never becomes
+     * `ans`, so this still sees 29.43 m/s. */
+    await app.enter('ans > 1');
+    card = await app.lastCard();
+    check('a comparison against a unit answer is dimension-checked',
+      card && card.failed && !/True/i.test(card.text), card?.text);
+
     await app.enter('[1, 2]');
     card = await app.lastCard();
     check('a list result survives the unit gate',
@@ -577,6 +589,20 @@ const GROUPS = {
     card = await app.lastCard();
     check('h still means an hour in a binding',
       card && !card.failed && /7200/.test(card.text), card?.text);
+
+    /* Adding a number to a gravitational constant is a mismatch, and the
+     * complaint has to read as a sentence. The dimension of G is
+     * length**3/(mass*time**2), whose own parentheses used to close the strip
+     * early and leave `Dimension(...)` standing in the message — SymPy's class
+     * name, in the interface. Both halves are the assertion: the wrapper gone,
+     * and the dimension itself still there to read rather than stripped away
+     * with it. */
+    await app.setField('at', 'x = 1');
+    await app.enter('G + 1');
+    card = await app.lastCard();
+    check('a dimension complaint keeps SymPy’s wrapper out of it',
+      card && card.failed && /length\*\*3/.test(card.text) && !/Dimension\(/.test(card.text),
+      card?.text);
 
     /* The page keeps its id — renaming it would orphan the saved keypad page
      * in every install — and only its tab label changes. */

@@ -339,11 +339,13 @@ def _parse(src, extra=None):
     # substitute resolved a constant, so `_quantities_possible()` rules units
     # out cheaply. It rules nothing in — `a = 2c` arms it.
     #
-    # The `sp.Expr` guard is not about atoms: a Boolean has those too. It is
-    # what keeps Relationals out of the dimension check — `x > 1` is not a
-    # quantity and has no factor and dimension to collect — and it also skips
-    # the list parse_expr hands back for `[1, 2]`.
-    if _quantities_possible() and isinstance(expr, sp.Expr) and _has_units(expr):
+    # The guard is about what `_check_dimensions` knows how to read, not about
+    # atoms — it skips the plain list parse_expr hands back for `[1, 2]`, and
+    # the FiniteSet it hands back for `{1, 2}`. Comparisons are in, not out:
+    # `ans > 1` on a velocity is a mismatch like any other, and the fact that a
+    # Relational has no factor and dimension of its own is why it needs taking
+    # apart there rather than skipping here.
+    if _quantities_possible() and isinstance(expr, _CHECKABLE) and _has_units(expr):
         _check_dimensions(expr)
     return expr
 
@@ -603,12 +605,55 @@ def _parse_answer(text):
     return _parse(text, extra={name: names[name] for name in _UNIT_NAMES})
 
 
-# `Dimension(action, A)` carries the dimension's own abbreviation as a second
-# argument; only the first is a word the sentence can use, so the rest goes.
-_DIMENSION_RE = re.compile(r"Dimension\(([^(),]*)[^()]*\)")
-
 # SymPy names the offending quantity in quotes, in its own spelling.
 _QUOTED_NAME_RE = re.compile(r'"([A-Za-z_][A-Za-z0-9_]*)"')
+
+_DIMENSION_OPEN = "Dimension("
+
+
+def _strip_dimensions(text):
+    """Unwrap every `Dimension(...)`, keeping only its first argument.
+
+    A scan rather than a regex, because the argument nests. `Dimension(length)`
+    is easy, but the dimension of `G` is `length**3/(mass*time**2)`, whose own
+    parentheses close the match early — a regex balances nothing, so it either
+    stops at the inner `)` or fails outright and leaves the whole wrapper
+    standing in the sentence. Only the first argument is a word the sentence
+    can use: `Dimension(action, A)` packs the dimension's own abbreviation
+    beside its name, and `A` says nothing to anyone.
+    """
+    out, i = [], 0
+    while True:
+        start = text.find(_DIMENSION_OPEN, i)
+        if start < 0:
+            out.append(text[i:])
+            return "".join(out)
+        out.append(text[i:start])
+
+        # Walk from the opening bracket to the one that closes it, noting the
+        # first comma that separates arguments rather than nesting inside one.
+        opened = start + len(_DIMENSION_OPEN) - 1
+        depth, end, comma = 0, -1, -1
+        for j in range(opened, len(text)):
+            char = text[j]
+            if char in "([{":
+                depth += 1
+            elif char in ")]}":
+                depth -= 1
+                if depth == 0:
+                    end = j
+                    break
+            elif char == "," and depth == 1 and comma < 0:
+                comma = j
+        if end < 0:
+            # Unbalanced, so there is nothing to unwrap with any confidence.
+            # Leave the remainder exactly as SymPy wrote it.
+            out.append(text[start:])
+            return "".join(out)
+
+        inner = text[opened + 1:comma if comma >= 0 else end]
+        out.append(_strip_dimensions(inner))
+        i = end + 1
 
 
 def _unit_mismatch(exc):
@@ -618,18 +663,32 @@ def _unit_mismatch(exc):
     SymPy packs beside the dimension's name. And the quantity is renamed:
     SymPy calls it `speed_of_light` and `planck`, but `c` and `h` are what the
     user typed and the only names this app has ever shown them.
+
+    Guarded, because this already runs on the way to telling the user their
+    units are wrong. Untranslated SymPy vocabulary is a poor message; a second
+    failure here would replace their answer with a traceback, which is worse.
     """
-    text = _DIMENSION_RE.sub(r"\1", str(exc)).strip().rstrip(".")
-    return _QUOTED_NAME_RE.sub(
-        lambda m: '"%s"' % _PHYSICAL_BY_SYMPY.get(m.group(1), (m.group(1),))[0],
-        text,
-    )
+    raw = str(exc)
+    try:
+        text = _strip_dimensions(raw).strip().rstrip(".")
+        return _QUOTED_NAME_RE.sub(
+            lambda m: '"%s"' % _PHYSICAL_BY_SYMPY.get(m.group(1), (m.group(1),))[0],
+            text,
+        )
+    except Exception:
+        return raw.strip().rstrip(".")
 
 
 def _has_units(expr):
     from sympy.physics.units import Quantity
 
     return bool(expr.atoms(Quantity))
+
+
+# What `_check_dimensions` can take apart. A Boolean is here for the comparison
+# it holds, not for itself; everything else parse_expr can return — a list, a
+# Tuple, a FiniteSet — has no dimensions to disagree about.
+_CHECKABLE = (sp.Expr, sp.logic.boolalg.Boolean)
 
 
 def _check_dimensions(expr):
@@ -640,6 +699,26 @@ def _check_dimensions(expr):
     """
     from sympy.physics.units.systems.si import SI
     from sympy.physics.units.util import check_dimensions
+
+    # A comparison has no dimension of its own, and SymPy does not go looking
+    # for one: `_collect_factor_and_dimension` hands back Dimension(1) for any
+    # Relational without reading it, which is how `ans > 1` on 29.43 m/s came
+    # back as a plain True. Dimensionally `a > b` is `a - b` — the comparison
+    # means something exactly when the subtraction does — so that is what gets
+    # checked, and checking the difference rather than one side at a time is
+    # what catches `ans > 1`, where each side is beyond reproach alone.
+    if isinstance(expr, sp.core.relational.Relational):
+        left, right = expr.args
+        if isinstance(left, sp.Expr) and isinstance(right, sp.Expr):
+            _check_dimensions(left - right)
+        return
+
+    # `&` builds an And over comparisons, and each one still has to hold up.
+    if not isinstance(expr, sp.Expr):
+        for arg in expr.args:
+            if isinstance(arg, _CHECKABLE) and _has_units(arg):
+                _check_dimensions(arg)
+        return
 
     if expr.free_symbols:
         # An unbound symbol could carry any dimension, so the strict check
