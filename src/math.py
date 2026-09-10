@@ -7,6 +7,7 @@ never leaks a Python traceback.
 
 import json
 import re
+import types
 
 import numpy as np
 import sympy as sp
@@ -202,6 +203,12 @@ MESSAGES = {
             "Não consegui interpretar — confira os parênteses e operadores.",
         "That isn’t an expression — type something like “x^2 + 1”.":
             "Isso não é uma expressão — digite algo como “x^2 + 1”.",
+        "That function got the wrong number of arguments.":
+            "Essa função recebeu um número errado de argumentos.",
+        "That’s a chained comparison — compare two things at a time, "
+        "like “x < 3”.":
+            "Isso é uma comparação encadeada — compare dois valores por vez, "
+            "como “x < 3”.",
         "That divides by zero.": "Isso divide por zero.",
         "That expression nests too deeply.":
             "A expressão tem aninhamento demais.",
@@ -298,6 +305,32 @@ _NOT_AN_EXPRESSION = "That isn’t an expression — type something like “x^2 
 # only these two are the parser's own doing rather than the user's.
 _UNCOMBINABLE_RE = re.compile(r"unsupported operand type|multiply sequence")
 
+_WRONG_ARITY = "That function got the wrong number of arguments."
+
+_CHAINED_COMPARISON = (
+    "That’s a chained comparison — compare two things at a time, like “x < 3”."
+)
+
+# CPython's own dialect for a call that doesn't fit the signature: the name,
+# then empty parentheses, then takes/missing/got — "_log_base10() takes from 1
+# to 2 positional arguments but 3 were given". SymPy's Function classes phrase
+# an arity slip differently, with no parentheses on the name — "atan2 takes
+# exactly 2 arguments (1 given)" — which is what tells the two apart, and that
+# one is worth showing: it names a function the user actually typed.
+_BAD_CALL_RE = re.compile(r"\A(?P<name>[^\s()]+)\(\) (?:takes|missing|got) ")
+
+# The names CPython would put in that sentence for the callables this app
+# installs in the namespace — the ones that are plain Python functions rather
+# than SymPy classes. Every one of them is an internal spelling: `_log_base10`
+# is this module's private helper, `<lambda>` is not a name at all, and `root`,
+# `sqrt` and `cbrt` name SymPy's implementation of a key the user pressed. None
+# of them is translated, either. An arity slip on one of these is the app's own
+# to phrase, so `_parse` phrases it.
+_OWN_CALL_NAMES = frozenset(
+    getattr(fn, "__name__", "") for fn in _FUNCTIONS.values()
+    if isinstance(fn, types.FunctionType)
+)
+
 
 def _expression(value):
     """Insist on an expression — something with arithmetic to do."""
@@ -335,15 +368,35 @@ def _parse(src, extra=None):
         # type 'Quantity'". Neither sentence is about anything the user typed,
         # so both become the one below.
         #
-        # Only those two, though. Every other TypeError from here is about
-        # something the user really did write, and already has a better sentence
-        # waiting in `_friendly`: `1 < x < 3` is a chained comparison, which
-        # Python evaluates with `and`, so it raises "cannot determine truth value
-        # of Relational" — a missing concrete value, not a malformed expression —
-        # and `atan2(1)` is an arity slip that names itself perfectly well.
-        if not _UNCOMBINABLE_RE.search(str(exc)):
-            raise
-        raise MathError(_NOT_AN_EXPRESSION)
+        # Only those two, though. The rest of this branch sorts the remaining
+        # TypeErrors by who they are about, because `_friendly`'s fallback
+        # prints whatever it is handed — and half of what parse_expr raises
+        # here is written in Python's vocabulary, not the app's.
+        message = str(exc)
+        if _UNCOMBINABLE_RE.search(message):
+            raise MathError(_NOT_AN_EXPRESSION)
+
+        # A chained comparison — `1 < x < 3` — is evaluated by Python as
+        # `(1 < x) and (x < 3)`, and `and` asks each Relational for its truth
+        # value: "cannot determine truth value of Relational". That is not a
+        # free variable waiting for a value, whatever it looks like: the
+        # failure happens while the text is being read, before any binding is
+        # applied, so supplying `x = 1` changes nothing. Name the real limit.
+        if "cannot determine truth value" in message:
+            raise MathError(_CHAINED_COMPARISON)
+
+        # An arity slip on one of this app's own callables, phrased by CPython
+        # in terms of the function object it happened to call. `atan2(1)` is
+        # the case this must not catch: SymPy names the function the user
+        # typed and counts its arguments, which is a better sentence than any
+        # of ours.
+        bad_call = _BAD_CALL_RE.match(message)
+        if bad_call and bad_call.group("name") in _OWN_CALL_NAMES:
+            raise MathError(_WRONG_ARITY)
+
+        # Anything left really is about something the user wrote, and says so
+        # in its own words.
+        raise
     return _check_units(sp.sympify(parsed))
 
 

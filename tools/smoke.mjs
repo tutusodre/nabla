@@ -437,32 +437,69 @@ const GROUPS = {
       card && card.failed && /isn.t an expression|não é uma expressão/.test(card.text)
         && !/attribute|object/i.test(card.text), card?.text);
 
-    /* Three inputs `parse_expr` answers with the same TypeError, and three
-     * different mistakes. Only the first is the parser's own doing: `2 sin`
-     * puts a function name where a value belongs and fails on the implicit
+    /* Four inputs `parse_expr` answers with the same TypeError, and four
+     * different mistakes. The first is the parser's own doing: `2 sin` puts a
+     * function name where a value belongs and fails on the implicit
      * multiplication, whose complaint — "unsupported operand type(s) for *" —
-     * is about nothing the user typed. The other two are the user's own, and
-     * each already had a better sentence: a chained comparison is an
-     * expression, it just needs a concrete value, and an arity slip names its
-     * arity. The card echoes the source it was given, so the assertion for
-     * each of those two is the message the other two must not get. */
+     * is about nothing the user typed. The rest are the user's own, and each
+     * needs its own sentence. The card echoes the source it was given, so the
+     * assertion for each is as much the messages it must not get. */
     await app.enter('2 sin');
     card = await app.lastCard();
     check('a bare function name is not an expression',
       card && card.failed && /isn.t an expression|não é uma expressão/.test(card.text),
       card?.text);
 
+    /* `1 < x < 3` fails while the text is being read — Python evaluates the
+     * chain with `and`, which asks a Relational for a truth value — so it
+     * fails before any binding is applied. The binding above supplies the
+     * concrete value the old message asked for, which is the point: advice
+     * the user has already taken is advice about the wrong problem. */
     await app.enter('1 < x < 3');
     card = await app.lastCard();
-    check('a chained comparison asks for a concrete value',
-      card && card.failed && /concrete value|valor concreto/i.test(card.text)
+    check('a chained comparison says it is a chained comparison',
+      card && card.failed && /chained comparison|comparação encadeada/i.test(card.text)
+        && !/concrete value|valor concreto/i.test(card.text)
         && !/isn.t an expression|não é uma expressão/.test(card.text), card?.text);
 
+    /* SymPy's own arity wording names the function the user typed and counts
+     * its arguments. It stays. */
     await app.enter('atan2(1)');
     card = await app.lastCard();
     check('an arity slip names the arity',
       card && card.failed && /exactly 2 arguments/i.test(card.text)
-        && !/isn.t an expression|não é uma expressão/.test(card.text), card?.text);
+        && !/isn.t an expression|não é uma expressão/.test(card.text)
+        && !/wrong number of arguments/i.test(card.text), card?.text);
+
+    /* CPython phrases an arity slip in terms of the object it called, and for
+     * these three that object is this app's own: `log` is a private helper
+     * called `_log_base10`, `log10` is a lambda — `<lambda>` is not even a
+     * name — and `root` is SymPy's implementation of a key on the keypad.
+     * None of that wording is translated either. Both halves are the
+     * assertion: the app's own sentence present, the module's internals
+     * absent. */
+    for (const source of ['log(2, 8, 3)', 'log10(1, 2)', 'root(1)']) {
+      await app.enter(source);
+      card = await app.lastCard();
+      check(`${source} is refused without naming a Python internal`,
+        card && card.failed && /wrong number of arguments/i.test(card.text)
+          && !/_log_base10|lambda|positional argument/i.test(card.text), card?.text);
+    }
+
+    /* And in Portuguese, where the leaked English sentence was all the user
+     * got. */
+    check('the app switches to Portuguese', await app.setLang('pt') === 'pt');
+    await app.enter('log(2, 8, 3)');
+    card = await app.lastCard();
+    check('an arity slip is refused in Portuguese too',
+      card && card.failed && /número errado de argumentos/i.test(card.text)
+        && !/_log_base10|lambda|positional argument/i.test(card.text), card?.text);
+
+    await app.enter('1 < x < 3');
+    card = await app.lastCard();
+    check('and a chained comparison too',
+      card && card.failed && /comparação encadeada/i.test(card.text)
+        && !/concrete value|valor concreto/i.test(card.text), card?.text);
 
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },
