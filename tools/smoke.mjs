@@ -246,6 +246,40 @@ function makeApp(s) {
       return true;
     })()`),
 
+    /* The app renders a plot into a canvas, so the numbers are only readable
+     * through the chart it built — and that is the right place to read them:
+     * it is the live entry, before `slim()` thins the stored copy. */
+    plotData: () => s.eval(`(() => {
+      const canvas = document.querySelector('.card .chart canvas');
+      if (!canvas || !window.Chart) return null;
+      const chart = Chart.getChart(canvas);
+      if (!chart) return null;
+      const first = chart.data.datasets[0].data;
+      const drawn = first.filter((p) => p.y !== null && p.y !== undefined);
+      return {
+        series: chart.data.datasets.length,
+        points: first.length,
+        gaps: first.length - drawn.length,
+        top: drawn.reduce((best, p) => Math.max(best, p.y), -Infinity),
+        yMin: chart.options.scales.y.min,
+        yMax: chart.options.scales.y.max,
+      };
+    })()`),
+
+    tableRows: () => s.eval(`(() => {
+      const rows = [...document.querySelectorAll('.card .vt tbody tr')];
+      return rows.map((row) => [...row.querySelectorAll('td')]
+        .map((cell) => cell.textContent.trim()));
+    })()`),
+
+    /* Clicks the real button, so the language really is the app's own. */
+    setLang: (lang) => s.eval(`(() => {
+      if (window.NablaI18n.lang !== ${json(lang)}) {
+        document.getElementById('langBtn').click();
+      }
+      return window.NablaI18n.lang;
+    })()`),
+
     enter: async (source) => {
       const before = await s.eval('document.querySelectorAll(".card").length');
       await s.eval(`(() => {
@@ -682,6 +716,198 @@ const GROUPS = {
     await app.enter('sin(x)');
     card = await app.lastCard();
     check('a non-numeric order is caught', card && card.failed, card?.text);
+
+    check('no console errors', s.errors.length === 0, s.errors.join(' | '));
+  },
+
+  solve: async (s, app) => {
+    await s.open(APP);
+    await app.boot();
+    await app.tapTab('op');
+    check('solve key selects it',
+      await app.tapKey('solve') && await app.currentOp() === 'solve');
+
+    await app.enter('x^2 = 4');
+    let card = await app.lastCard();
+    // The roots are ±2 and the minus is the assertion: the statement echoes
+    // "x^2 = 4", which has a 2 in it either way, but nothing there is negative.
+    check('an equation solves', card && !card.failed && /[-−]\s*2/.test(card.text),
+      card?.text);
+
+    /* `complex_roots` is the app's only checkbox, and until setField knew what
+     * one was it could not be driven from here at all. x^2 + 1 makes the
+     * setting observable in both directions: no real roots, exactly two
+     * complex ones, so the same input has to fail with the box clear and
+     * answer with it ticked. */
+    await app.enter('x^2 + 1');
+    card = await app.lastCard();
+    check('complex roots stay hidden while the box is clear',
+      card && card.failed && /complex|complexa/i.test(card.text), card?.text);
+
+    check('the complex box takes a value', await app.setField('complex_roots', true));
+    check('the app read the tick',
+      await s.eval('document.getElementById("f-complex_roots").checked === true'));
+
+    await app.enter('x^2 + 1');
+    card = await app.lastCard();
+    // "x = i" and "x = −i" can only come from the roots: the statement is
+    // "x^2 + 1 = 0, solve for x", which puts no i after any "=".
+    check('ticking complex changes the result',
+      card && !card.failed && /x\s*=\s*[-−]?\s*i(?![a-z])/.test(card.text), card?.text);
+
+    /* `[1, 2]` is a Python list, not an expression, and `sp.Eq` sympifies what
+     * it is handed — so an equation with a list on either side used to come
+     * back as "SympifyError: [1, 2]", a Python class name standing in the
+     * interface. Both sides get asserted because both sides reach Eq. */
+    await app.enter('[1, 2] = x');
+    card = await app.lastCard();
+    check('a list on the left of = is refused in words',
+      card && card.failed && /isn.t an expression|não é uma expressão/.test(card.text)
+        && !/SympifyError/i.test(card.text), card?.text);
+
+    await app.enter('x = [1, 2]');
+    card = await app.lastCard();
+    check('a list on the right of = is refused in words',
+      card && card.failed && /isn.t an expression|não é uma expressão/.test(card.text)
+        && !/SympifyError/i.test(card.text), card?.text);
+
+    /* An equation's sides are checked one at a time on the way in, and
+     * `ans = 1` passes that twice over: 29.43 m/s is a fine expression and so
+     * is 1. Only the equation itself disagrees, so only checking the equation
+     * catches it — and until it was checked, solve answered "No solutions
+     * found.", which reads as a fact about the maths rather than a mistake in
+     * it. Both halves are the assertion for that reason. */
+    await app.tapKey('x = a');
+    // 3000 ms rather than 3 s, for the reason the units group gives: read as
+    // ordinary symbols this is 29430*m^2/s, with no decimal point anywhere, so
+    // the answer can only be 29.43 m/s if the binding really read units.
+    await app.setField('at', 'a = 9.81 m/s^2, t = 3000 ms');
+    await app.enter('a*t');
+    card = await app.lastCard();
+    check('a unit answer is computed for reuse',
+      card && !card.failed && /29\.43/.test(card.text), card?.text);
+
+    await app.tapKey('solve');
+    await app.enter('ans = 1');
+    card = await app.lastCard();
+    check('an equation is dimension-checked, not only its sides',
+      card && card.failed && /units/i.test(card.text) && !/No solutions/i.test(card.text),
+      card?.text);
+
+    check('no console errors', s.errors.length === 0, s.errors.join(' | '));
+  },
+
+  plot: async (s, app) => {
+    await s.open(APP);
+    await app.boot();
+    await app.tapTab('op');
+    check('plot key selects it',
+      await app.tapKey('plot') && await app.currentOp() === 'plot');
+
+    await app.enter('sin(x), cos(x)');
+    let card = await app.lastCard();
+    let plot = await app.plotData();
+    check('an ordinary plot renders', card && !card.failed && plot !== null, card?.text);
+    // Two functions, the full sample count, and a curve that really is a sine:
+    // its top is 1, and the y-range sits just outside it.
+    check('both functions are drawn over the whole sample',
+      plot && plot.series === 2 && plot.points === 700 && plot.gaps === 0
+        && plot.top > 0.99 && plot.top <= 1, JSON.stringify(plot));
+    check('the y-range brackets the curve',
+      plot && plot.yMax > 1 && plot.yMax < 1.5 && plot.yMin < -1 && plot.yMin > -1.5,
+      JSON.stringify(plot));
+
+    /* 1/x^2 over the default range is the discontinuity case twice over. The
+     * asymptote has to break the line rather than draw a vertical stroke, so
+     * the samples around it come back as gaps. And the peak beside the gap is
+     * nearly 5000, while the 1st/99th percentiles are under half a unit — so
+     * a y-range taken from the extremes would flatten the whole plot into a
+     * line along zero, and one taken from the percentiles cannot. */
+    await app.enter('1/x^2');
+    card = await app.lastCard();
+    plot = await app.plotData();
+    check('the second plot renders', card && !card.failed && plot !== null, card?.text);
+    check('an asymptote becomes a gap, not a stroke',
+      plot && plot.gaps > 0, JSON.stringify(plot));
+    check('the y-range comes from the percentiles, not the extremes',
+      plot && plot.top > 1000 && plot.yMax < 10, JSON.stringify(plot));
+
+    /* A unit-bearing `ans` lambdifies fine and only fails on the cast to
+     * float, which is SymPy's own "Cannot convert expression to float" unless
+     * the cast sits inside op_plot's try. Both halves are the assertion: a
+     * card that failed, and a card that failed in this app's words. */
+    await app.tapKey('x = a');
+    // 3000 ms rather than 3 s, for the reason the units group gives: read as
+    // ordinary symbols this is 29430*m^2/s, with no decimal point anywhere, so
+    // the answer can only be 29.43 m/s if the binding really read units.
+    await app.setField('at', 'a = 9.81 m/s^2, t = 3000 ms');
+    await app.enter('a*t');
+    card = await app.lastCard();
+    check('a unit answer is computed for reuse',
+      card && !card.failed && /29\.43/.test(card.text), card?.text);
+
+    await app.tapKey('plot');
+    await app.enter('ans');
+    card = await app.lastCard();
+    check('a unit answer is refused in words',
+      card && card.failed && /numerically/i.test(card.text)
+        && !/Cannot convert|float/i.test(card.text), card?.text);
+
+    check('the app switches to Portuguese', await app.setLang('pt') === 'pt');
+    await app.enter('ans');
+    card = await app.lastCard();
+    check('and refused in Portuguese too',
+      card && card.failed && /numericamente/i.test(card.text)
+        && !/Cannot convert|float/i.test(card.text), card?.text);
+
+    check('no console errors', s.errors.length === 0, s.errors.join(' | '));
+  },
+
+  table: async (s, app) => {
+    await s.open(APP);
+    await app.boot();
+    await app.tapTab('op');
+    check('table key selects it',
+      await app.tapKey('table') && await app.currentOp() === 'table');
+
+    await app.setField('start', '-2');
+    await app.setField('stop', '2');
+    await app.setField('step', '1');
+    await app.enter('x^2');
+    let card = await app.lastCard();
+    check('a table over a range renders', card && !card.failed, card?.text);
+
+    // Every row, both columns: the range is walked by the step, and each x is
+    // squared. A wrong step or an off-by-one row shows up as a shorter list.
+    const rows = JSON.stringify(await app.tableRows());
+    check('the rows walk the range and hold the values',
+      rows === '[["-2","4"],["-1","1"],["0","0"],["1","1"],["2","4"]]', rows);
+
+    /* op_table's cast to float sits inside its try for the same reason
+     * op_plot's does, and needs the same evidence. */
+    await app.tapKey('x = a');
+    // 3000 ms rather than 3 s, for the reason the units group gives: read as
+    // ordinary symbols this is 29430*m^2/s, with no decimal point anywhere, so
+    // the answer can only be 29.43 m/s if the binding really read units.
+    await app.setField('at', 'a = 9.81 m/s^2, t = 3000 ms');
+    await app.enter('a*t');
+    card = await app.lastCard();
+    check('a unit answer is computed for reuse',
+      card && !card.failed && /29\.43/.test(card.text), card?.text);
+
+    await app.tapKey('table');
+    await app.enter('ans');
+    card = await app.lastCard();
+    check('a unit answer is refused in words',
+      card && card.failed && /numerically/i.test(card.text)
+        && !/Cannot convert|float/i.test(card.text), card?.text);
+
+    check('the app switches to Portuguese', await app.setLang('pt') === 'pt');
+    await app.enter('ans');
+    card = await app.lastCard();
+    check('and refused in Portuguese too',
+      card && card.failed && /numericamente/i.test(card.text)
+        && !/Cannot convert|float/i.test(card.text), card?.text);
 
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },
