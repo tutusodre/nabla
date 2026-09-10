@@ -518,6 +518,17 @@ const GROUPS = {
           && !/_log_base10|lambda|positional argument/i.test(card.text), card?.text);
     }
 
+    /* CPython phrases the same complaint a fourth way when the mismatch is a
+     * keyword rather than a position — "_log_base10() got an unexpected
+     * keyword argument 'foo'" — and it is reachable: SymPy's `auto_symbol`
+     * passes keyword arguments through unconverted, so a plain `foo=8` in the
+     * text reaches the call. Same two-part assertion as above. */
+    await app.enter('log(2, foo=8)');
+    card = await app.lastCard();
+    check('log(2, foo=8) is refused without naming a Python internal',
+      card && card.failed && /wrong number of arguments/i.test(card.text)
+        && !/_log_base10|lambda|positional argument/i.test(card.text), card?.text);
+
     /* And in Portuguese, where the leaked English sentence was all the user
      * got. */
     check('the app switches to Portuguese', await app.setLang('pt') === 'pt');
