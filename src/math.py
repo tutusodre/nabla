@@ -254,9 +254,13 @@ def _parse(src, extra=None):
     expr = sp.sympify(parse_expr(text, local_dict=names, transformations=TRANSFORMS))
     # Units reach every other operation through `ans`, and "mismatched
     # dimensions are an error, not a silent number" is not substitute's promise
-    # alone: `ans + 1` on 29.43 m/s has to fail here too. An empty cache means
-    # nothing in this session ever built a Quantity, so there is none to find.
-    if _UNIT_CACHE and _has_units(expr):
+    # alone: `ans + 1` on 29.43 m/s has to fail here too.
+    #
+    # The cache is empty until some binding value contained a letter, and only
+    # `_unit_names()` ever builds a Quantity, so an empty one rules units out
+    # cheaply. A full one rules nothing in — `a = 2c` fills it — and parse_expr
+    # can hand back a list or a Boolean, neither of which has atoms to scan.
+    if _UNIT_CACHE and isinstance(expr, sp.Expr) and _has_units(expr):
         _check_dimensions(expr)
     return expr
 
@@ -606,20 +610,29 @@ def _decimal_alternate(expr):
             return None
         return {"label": _t("decimal"), "latex": plain, "text": plain}
 
-    if not _UNIT_CACHE or getattr(expr, "free_symbols", set()):
+    # Not every result is an ordinary expression: `x > 1` substitutes to a
+    # Boolean and a list stays a list, and neither has a coefficient to split
+    # off. The cache being non-empty says only that some binding value held a
+    # letter — `a = 2c` fills it — so it cannot stand in for that test.
+    if not _UNIT_CACHE or not isinstance(expr, sp.Expr) or expr.free_symbols:
         return None
 
-    coeff, units = expr.as_coeff_Mul()
-    # A coefficient of 1 means there was no number out front to round — an
-    # unfolded sum of unit terms, say — and an integer one is already exact.
-    if coeff == 1 or coeff.is_Integer or not _has_units(units):
+    try:
+        coeff, units = expr.as_coeff_Mul()
+        # A coefficient of 1 means there was no number out front to round — an
+        # unfolded sum of unit terms, say — and an integer one is already exact.
+        if coeff == 1 or coeff.is_Integer or not _has_units(units):
+            return None
+        decimal = _approx(coeff)
+        if decimal is None:
+            return None
+        shown = sp.Float(decimal) * units
+        if _text(shown) == _text(expr):
+            return None
+        return {"label": _t("decimal"), **_fmt(shown)}
+    except Exception:
+        # An alternate is a courtesy; it never costs the answer itself.
         return None
-
-    decimal = _approx(coeff)
-    if decimal is None:
-        return None
-    shown = sp.Float(decimal) * units
-    return None if _text(shown) == _text(expr) else {"label": _t("decimal"), **_fmt(shown)}
 
 
 def _alternate(label, expr, *against):
@@ -1118,8 +1131,9 @@ def op_substitute(source="", at=""):
 
     # simultaneous keeps `x = y, y = x` a swap rather than a cascade.
     result = expr.subs(pairs, simultaneous=True)
-    # An empty cache means no binding in this session ever looked a unit up, so
-    # there is no Quantity to find and the whole unit path can be skipped.
+    # Only `_unit_names()` ever builds a Quantity, and it has not run while the
+    # cache is empty — so an empty cache rules units out. A full one rules
+    # nothing in: any binding value holding a letter fills it, units or not.
     has_units = bool(_UNIT_CACHE) and _has_units(result)
 
     if has_units:

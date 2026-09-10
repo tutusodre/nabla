@@ -374,6 +374,16 @@ const GROUPS = {
     check('bare names still mean variables, not units',
       card && !card.failed && /\b5\b/.test(card.text), card?.text);
 
+    /* Everything below runs with the unit namespace already built, which is
+     * the state that used to break these: a result that is not an ordinary
+     * expression has no coefficient to split and no atoms to scan. Order
+     * matters — the earlier checks are what arm it. */
+    await app.setField('at', 'x = 2');
+    await app.enter('x > 1');
+    card = await app.lastCard();
+    check('a boolean result survives the unit paths',
+      card && !card.failed && /True/i.test(card.text), card?.text);
+
     /* Dimensions are not substitute's promise alone: a unit answer reused in
      * another op has to be checked there too, or `ans + 1` on 29.43 m/s comes
      * back as a metre added to a number. */
@@ -384,6 +394,12 @@ const GROUPS = {
     card = await app.lastCard();
     check('units carried by ans are checked in other ops',
       card && card.failed, card?.text);
+
+    await app.enter('[1, 2]');
+    card = await app.lastCard();
+    check('a list result survives the unit gate',
+      card && !card.failed && /1/.test(card.text) && /2/.test(card.text)
+        && !/attribute/i.test(card.text), card?.text);
 
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },
