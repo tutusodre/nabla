@@ -241,7 +241,7 @@ const GROUPS = {
     check('integral key selects the integral op',
       await app.tapKey('∫') && await app.currentOp() === 'integral');
     check('op label shows the current op',
-      /integral|integral/i.test(await s.eval('document.querySelector(".oplabel")?.textContent || ""')));
+      /integral/i.test(await s.eval('document.querySelector(".oplabel")?.textContent || ""')));
 
     // A coarse pointer means the keypad is showing, so chips must be hidden.
     check('chips hidden while the keypad shows',
@@ -320,11 +320,16 @@ const GROUPS = {
     await app.tapTab('op');
     await app.tapKey('x = a');
 
-    await app.setField('at', 'a = 9.81 m/s^2, t = 3 s');
+    /* 3000 ms rather than 3 s, so the number is something only a real unit can
+     * produce: read as ordinary symbols this is 9.81*m/s^2 times 3000*m*s —
+     * 29430*m^2/s, with no decimal point anywhere. The metre has to sit on the
+     * value for the same reason; looking for a loose "m/s" would be answered
+     * by the card's own echo of the binding text, which has one either way. */
+    await app.setField('at', 'a = 9.81 m/s^2, t = 3000 ms');
     await app.enter('a*t');
     let card = await app.lastCard();
     check('units multiply through',
-      card && !card.failed && /29\.4/.test(card.text) && /m\/s|meter/.test(card.text), card?.text);
+      card && !card.failed && /29\.43\s*m(?![a-z])/.test(card.text), card?.text);
 
     /* The stored answer reads "29.43*meter/second". Reused, it has to come
      * back as that — the ordinary parser would shred the long spellings into
@@ -419,6 +424,28 @@ const GROUPS = {
     check('ans chains from the last result',
       card && !card.failed && /3x/.test(card.text), card?.text);
 
+    /* Two hops, because one hop cannot tell .find() from .findLast(): with a
+     * single result in the history both pick it. Here the oldest qualifying
+     * answer is 3x^2 and the newest is 7x^6, and only the newest
+     * differentiates to 42x^5. */
+    await app.enter('x^7');
+    await app.enter('ans');
+    card = await app.lastCard();
+    check('ans is the newest answer, not the first',
+      card && !card.failed && /42\s*x/.test(card.text), card?.text);
+
+    /* A series qualifies too — the O(...) term re-parses, so an expansion is
+     * a reusable answer and `ans` must not reach past it to an older one. The
+     * O term is the assertion: reaching past would land on 42x^5, which has
+     * none. */
+    await app.tapKey('series');
+    await app.enter('sin(x)');
+    await app.tapKey('simplify');
+    await app.enter('ans');
+    card = await app.lastCard();
+    check('a series expansion is a reusable answer',
+      card && !card.failed && /O\(/.test(card.text), card?.text);
+
     await s.eval('localStorage.clear()');
     await s.open(APP);
     await app.boot();
@@ -480,12 +507,14 @@ const GROUPS = {
       card && !card.failed && /89875517873681764/.test(card.text), card?.text);
 
     /* The rule that keeps `c` usable as a constant of integration: a name you
-     * bind yourself is yours. Two times three squared is eighteen. */
+     * bind yourself is yours. Two times three cubed is fifty-four — cubed, and
+     * not squared, because every card carries a 2-digit clock and the 18 this
+     * used to look for matched the minutes at :18 whatever the answer was. */
     await app.setField('at', 'm = 2, c = 3');
-    await app.enter('m*c^2');
+    await app.enter('m*c^3');
     card = await app.lastCard();
     check('a binding beats the physical value',
-      card && !card.failed && /\b18\b/.test(card.text), card?.text);
+      card && !card.failed && /\b54\b/.test(card.text), card?.text);
 
     /* SymPy has no named SI unit for what k_B measures, so folding leaves it
      * alone — the answer still has to be a number rather than "k_B". */
@@ -518,13 +547,14 @@ const GROUPS = {
       card && !card.failed && /2\.718/.test(card.text), card?.text);
 
     /* One expression, both meanings of g: a gram on the right of a binding,
-     * gravity in the expression. 0.5 kg * 9.80665 m/s^2 = 4.903325 N. */
+     * gravity in the expression. 0.5 kg * 9.80665 m/s^2 = 4.903325 N. The N
+     * has to sit on the value: alternate labels are uppercased in CSS, so a
+     * bare /N/ is answered by the card's own "AS WRITTEN". */
     await app.setField('at', 'm = 500 g');
     await app.enter('m*g');
     card = await app.lastCard();
     check('g is a gram in a binding and gravity in an expression',
-      card && !card.failed && /4\.903325/.test(card.text) && /N/.test(card.text),
-      card?.text);
+      card && !card.failed && /4\.903325\s*N/.test(card.text), card?.text);
 
     /* `h` is an hour on the right of a binding for the same reason. */
     await app.setField('at', 't = 2 h');
