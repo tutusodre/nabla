@@ -358,11 +358,32 @@ const GROUPS = {
     check('prefixes and ohm work',
       card && !card.failed && /9\.4/.test(card.text) && /V/.test(card.text), card?.text);
 
+    /* An exact answer with units is often the unreadable one — this is
+     * 100*meter/(3*second) — so it has to offer a decimal like every other
+     * result does. Without units the same sum already did. */
+    await app.setField('at', 'd = 100 m, t = 3 s');
+    await app.enter('d/t');
+    card = await app.lastCard();
+    check('a unit result still offers a decimal',
+      card && !card.failed && /decimal/i.test(card.text) && /33\.33/.test(card.text),
+      card?.text);
+
     await app.setField('at', 'm = 2, s = 3');
     await app.enter('m + s');
     card = await app.lastCard();
     check('bare names still mean variables, not units',
       card && !card.failed && /\b5\b/.test(card.text), card?.text);
+
+    /* Dimensions are not substitute's promise alone: a unit answer reused in
+     * another op has to be checked there too, or `ans + 1` on 29.43 m/s comes
+     * back as a metre added to a number. */
+    await app.setField('at', 'a = 9.81 m/s^2, t = 3 s');
+    await app.enter('a*t');
+    await app.tapKey('simplify');
+    await app.enter('ans + 1');
+    card = await app.lastCard();
+    check('units carried by ans are checked in other ops',
+      card && card.failed, card?.text);
 
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },

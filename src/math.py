@@ -251,8 +251,14 @@ def _parse(src, extra=None):
         if LAST_ANS is None:
             raise MathError("Nothing to reuse yet — compute something first.")
         names = {**names, "ans": LAST_ANS}
-    expr = parse_expr(text, local_dict=names, transformations=TRANSFORMS)
-    return sp.sympify(expr)
+    expr = sp.sympify(parse_expr(text, local_dict=names, transformations=TRANSFORMS))
+    # Units reach every other operation through `ans`, and "mismatched
+    # dimensions are an error, not a silent number" is not substitute's promise
+    # alone: `ans + 1` on 29.43 m/s has to fail here too. An empty cache means
+    # nothing in this session ever built a Quantity, so there is none to find.
+    if _UNIT_CACHE and _has_units(expr):
+        _check_dimensions(expr)
+    return expr
 
 
 def _split_top(text, sep=","):
@@ -583,6 +589,37 @@ def _approx(expr, digits=12):
         return _trim_zeros(_text(value))
     except Exception:
         return None
+
+
+def _decimal_alternate(expr):
+    """The `decimal` alternate for a result, units included.
+
+    `_approx` refuses anything holding a Quantity — a unit expression is never
+    `is_number` — so without this the answers most in need of a decimal are the
+    only ones that never get one: `3*kilogram/1000` and `200*meter/(9*second)`
+    are exact and unreadable, and the same sums without units offer a decimal.
+    The number is rounded and the units put back on.
+    """
+    plain = _approx(expr)
+    if plain is not None:
+        if plain == _text(expr):
+            return None
+        return {"label": _t("decimal"), "latex": plain, "text": plain}
+
+    if not _UNIT_CACHE or getattr(expr, "free_symbols", set()):
+        return None
+
+    coeff, units = expr.as_coeff_Mul()
+    # A coefficient of 1 means there was no number out front to round — an
+    # unfolded sum of unit terms, say — and an integer one is already exact.
+    if coeff == 1 or coeff.is_Integer or not _has_units(units):
+        return None
+
+    decimal = _approx(coeff)
+    if decimal is None:
+        return None
+    shown = sp.Float(decimal) * units
+    return None if _text(shown) == _text(expr) else {"label": _t("decimal"), **_fmt(shown)}
 
 
 def _alternate(label, expr, *against):
@@ -1092,9 +1129,9 @@ def op_substitute(source="", at=""):
         simplified = _try_simplify(result)
 
     alternates = []
-    decimal = _approx(simplified)
-    if decimal and decimal != _text(simplified):
-        alternates.append({"label": _t("decimal"), "latex": decimal, "text": decimal})
+    decimal = _decimal_alternate(simplified)
+    if decimal:
+        alternates.append(decimal)
     if has_units:
         # The raw substitution, when normalising moved it: 9.4*ampere*ohm
         # beside 9.4*volt says more than either does alone.
