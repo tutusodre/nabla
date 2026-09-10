@@ -261,6 +261,58 @@ const GROUPS = {
 
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },
+
+  substitute: async (s, app) => {
+    await s.open(APP);
+    await app.boot();
+    await app.tapTab('op');
+    check('substitute key selects it',
+      await app.tapKey('x = a') && await app.currentOp() === 'substitute');
+
+    await app.setField('at', 'x = 2');
+    await app.enter('x^3 + 1');
+    let card = await app.lastCard();
+    check('single binding evaluates', card && !card.failed && /\b9\b/.test(card.text), card?.text);
+
+    await app.setField('at', 'x = 2, y = 3');
+    await app.enter('x*y');
+    card = await app.lastCard();
+    check('two bindings evaluate', card && !card.failed && /\b6\b/.test(card.text), card?.text);
+
+    await app.setField('at', 'x = y, y = x');
+    await app.enter('x - y');
+    card = await app.lastCard();
+    // A cascaded (wrong) substitution collapses this to 0; a simultaneous one
+    // gives y - x, which SymPy's canonical term order prints as "-x + y"
+    // (MathJax renders the sign as U+2212, not ASCII "-").
+    check('bindings apply simultaneously',
+      card && !card.failed && /[-−]\s*x\s*\+\s*y|y\s*[-−]\s*x/.test(card.text),
+      card?.text);
+
+    await app.setField('at', '');
+    await app.enter('x + 1');
+    card = await app.lastCard();
+    check('empty bindings explain themselves', card && card.failed && /x = 2/.test(card.text),
+      card?.text);
+
+    await app.setField('at', 'x 2');
+    await app.enter('x + 1');
+    card = await app.lastCard();
+    check('a missing = is caught', card && card.failed, card?.text);
+
+    await app.setField('at', '2 = x');
+    await app.enter('x + 1');
+    card = await app.lastCard();
+    check('a non-name left side is caught', card && card.failed, card?.text);
+
+    await app.setField('at', 'x = 1, x = 2');
+    await app.enter('x + 1');
+    card = await app.lastCard();
+    check('a duplicate binding is caught', card && card.failed && /twice|duas/.test(card.text),
+      card?.text);
+
+    check('no console errors', s.errors.length === 0, s.errors.join(' | '));
+  },
 };
 
 async function main() {

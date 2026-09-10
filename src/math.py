@@ -172,6 +172,12 @@ MESSAGES = {
         "combined fraction": "fração única",
         "decimal": "decimal",
         "solve for": "resolver para",
+        "Give at least one value, like “x = 2”.": "Dê ao menos um valor, como “x = 2”.",
+        "Each value needs an “=”, like “x = 2”.": "Cada valor precisa de um “=”, como “x = 2”.",
+        "The left side of “=” has to be a variable name.":
+            "O lado esquerdo do “=” tem que ser um nome de variável.",
+        "“%s” has no value after the “=”.": "“%s” não tem valor depois do “=”.",
+        "“%s” is given a value twice.": "“%s” recebeu valor duas vezes.",
         # worked-step labels
         "Constant": "Constante",
         "Constant multiple": "Múltiplo constante",
@@ -268,6 +274,34 @@ def _parse_equation(src):
             raise MathError("An equation needs an expression on both sides of `=`.")
         return sp.Eq(_parse(left), _parse(right))
     return _parse(src)
+
+
+def _bindings(text, parse_value=None):
+    """`x = 2, y = 3` -> [(Symbol('x'), expr), ...].
+
+    `parse_value` overrides how the right-hand side is read, which is how
+    units get in without touching the main expression parser.
+    """
+    read = parse_value or _parse
+    parts = _split_top(text or "")
+    if not parts:
+        raise MathError("Give at least one value, like “x = 2”.")
+
+    pairs, seen = [], set()
+    for part in parts:
+        halves = _split_equation(part)
+        if not halves:
+            raise MathError("Each value needs an “=”, like “x = 2”.")
+        name, raw = halves[0].strip(), halves[1].strip()
+        if not _NAME_RE.match(name):
+            raise MathError("The left side of “=” has to be a variable name.")
+        if not raw:
+            raise MathError("“%s” has no value after the “=”.", name)
+        if name in seen:
+            raise MathError("“%s” is given a value twice.", name)
+        seen.add(name)
+        pairs.append((_sym(name), read(raw)))
+    return pairs
 
 
 def _sym(name):
@@ -823,6 +857,27 @@ def op_simplify(source=""):
     }
 
 
+def op_substitute(source="", at=""):
+    expr = _parse(source)
+    pairs = _bindings(at)
+
+    # simultaneous keeps `x = y, y = x` a swap rather than a cascade.
+    result = expr.subs(pairs, simultaneous=True)
+    simplified = _try_simplify(result)
+
+    alternates = []
+    decimal = _approx(simplified)
+    if decimal and decimal != _text(simplified):
+        alternates.append({"label": _t("decimal"), "latex": decimal, "text": decimal})
+
+    given = r",\; ".join("%s = %s" % (_latex(sym), _latex(val)) for sym, val in pairs)
+    return {
+        "statement": r"%s,\quad %s" % (_latex(expr), given),
+        "alternates": alternates,
+        **_fmt(simplified),
+    }
+
+
 def op_solve(source="", variable="x", complex_roots=False):
     parsed = _parse_equation(source)
     var = _sym(variable)
@@ -995,6 +1050,7 @@ OPERATIONS = {
     "integral": op_integral,
     "limit": op_limit,
     "simplify": op_simplify,
+    "substitute": op_substitute,
     "solve": op_solve,
     "plot": op_plot,
     "table": op_table,

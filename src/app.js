@@ -70,6 +70,15 @@
       fields: [],
       meta: () => t('meta.simplify'),
     },
+    substitute: {
+      labelKey: 'op.substitute',
+      chip: 'x = a',
+      placeholder: 'x^3 + 1',
+      fields: [
+        { name: 'at', labelKey: 'field.at', kind: 'text', value: '', placeholder: 'x = 2, y = 3' },
+      ],
+      meta: (params) => params.at || '',
+    },
     solve: {
       labelKey: 'op.solve',
       chipKey: 'chip.solve',
@@ -104,7 +113,7 @@
     },
   };
 
-  const OP_ORDER = ['derivative', 'integral', 'limit', 'simplify', 'solve', 'plot', 'table'];
+  const OP_ORDER = ['derivative', 'integral', 'limit', 'simplify', 'substitute', 'solve', 'plot', 'table'];
 
   /* Keypad pages. A key is [label, spec]: a plain string inserts literally,
    * {fn} inserts `name()` with the caret inside, {act} runs an action. */
@@ -121,7 +130,7 @@
         [null, null],
         ['simplify', { act: 'op', op: 'simplify' }],
         ['solve', { act: 'op', op: 'solve' }],
-        [null, null],
+        ['x = a', { act: 'op', op: 'substitute' }],
         [null, null],
         ['plot', { act: 'op', op: 'plot' }],
         ['table', { act: 'op', op: 'table' }],

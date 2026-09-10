@@ -43,6 +43,7 @@
       'op.integral': 'Integral',
       'op.limit': 'Limit',
       'op.simplify': 'Simplify',
+      'op.substitute': 'substitute',
       'op.solve': 'Solve',
       'op.plot': 'Plot',
       'op.table': 'Table',
@@ -62,6 +63,7 @@
       'field.both': 'both',
       'field.for': 'for',
       'field.complex': 'complex',
+      'field.at': 'at',
       'field.xFrom': 'x from',
       'field.step': 'step',
 
@@ -159,6 +161,7 @@
       'op.integral': 'Integral',
       'op.limit': 'Limite',
       'op.simplify': 'Simplificar',
+      'op.substitute': 'substituir',
       'op.solve': 'Resolver',
       'op.plot': 'Gráfico',
       'op.table': 'Tabela',
@@ -178,6 +181,7 @@
       'field.both': 'ambos',
       'field.for': 'para',
       'field.complex': 'complexo',
+      'field.at': 'em',
       'field.xFrom': 'x de',
       'field.step': 'passo',
 
