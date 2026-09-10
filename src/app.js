@@ -110,6 +110,24 @@
    * {fn} inserts `name()` with the caret inside, {act} runs an action. */
   const KEYPAD = [
     {
+      id: 'op',
+      tab: 'keypad.ops',
+      tabI18n: true,
+      cols: 4,
+      keys: [
+        ['d/dx', { act: 'op', op: 'derivative' }],
+        ['∫', { act: 'op', op: 'integral' }],
+        ['lim', { act: 'op', op: 'limit' }],
+        [null, null],
+        ['simplify', { act: 'op', op: 'simplify' }],
+        ['solve', { act: 'op', op: 'solve' }],
+        [null, null],
+        [null, null],
+        ['plot', { act: 'op', op: 'plot' }],
+        ['table', { act: 'op', op: 'table' }],
+      ],
+    },
+    {
       id: 'num',
       tab: '123',
       cols: 5,
@@ -176,7 +194,7 @@
   const el = {
     boot: $('boot'), bootStatus: $('bootStatus'), bootBar: $('bootBar'),
     stream: $('stream'), intro: $('intro'), preview: $('preview'),
-    chips: $('chips'), params: $('params'),
+    chips: $('chips'), params: $('params'), composer: $('composer'),
     form: $('form'), input: $('input'), go: $('go'), toast: $('toast'),
     themeBtn: $('themeBtn'), exportBtn: $('exportBtn'), clearBtn: $('clearBtn'),
     themeColor: $('themeColor'),
@@ -309,6 +327,18 @@
     const spec = OPS[state.op];
     const values = state.params[state.op];
 
+    /* Shows the current op and is also the way to change it, so finding the
+     * operations never depends on noticing a keypad tab. */
+    const opButton = node('button', 'oplabel', t(spec.labelKey));
+    opButton.type = 'button';
+    opButton.setAttribute('aria-label', t('nav.change'));
+    opButton.addEventListener('pointerdown', (event) => event.preventDefault());
+    opButton.addEventListener('click', () => {
+      setKeypadPage('op');
+      setKeypadOpen(true);
+    });
+    el.params.appendChild(opButton);
+
     for (const field of spec.fields) {
       const wrap = node('div', 'field');
       const label = node('label', 'field__label', t(field.labelKey));
@@ -373,7 +403,7 @@
     el.keypadPages.innerHTML = '';
 
     for (const page of KEYPAD) {
-      const tab = node('button', 'ktab', page.tab);
+      const tab = node('button', 'ktab', page.tabI18n ? t(page.tab) : page.tab);
       tab.dataset.page = page.id;
       tab.type = 'button';
       tab.setAttribute('role', 'tab');
@@ -388,6 +418,10 @@
       grid.hidden = page.id !== state.keypadPage;
 
       for (const [label, spec] of page.keys) {
+        if (spec === null) {
+          grid.appendChild(node('div', 'kgap'));
+          continue;
+        }
         const config = typeof spec === 'string' ? { text: spec } : spec;
         const key = node('button', 'key', config.i18n ? t(label) : label);
         key.type = 'button';
@@ -395,7 +429,7 @@
         if (config.full) key.classList.add('key--full');
         if (config.wide) key.classList.add('key--wide');
         if (config.act === 'enter') key.classList.add('key--go');
-        if (config.fn || config.act === 'native') key.classList.add('key--word');
+        if (config.fn || config.act === 'native' || config.act === 'op') key.classList.add('key--word');
 
         bindKey(key, () => pressKey(config), config.repeat);
         grid.appendChild(key);
@@ -466,6 +500,9 @@
       case 'right': moveCaret(1); break;
       case 'enter': submit(); break;
       case 'native': setKeyboard('native'); break;
+      case 'op':
+        setOp(config.op);
+        break;
       default: break;
     }
   }
@@ -529,6 +566,10 @@
     const math = wanted && state.keyboard === 'math';
     el.input.setAttribute('inputmode', math ? 'none' : 'text');
     el.keypad.hidden = !math;
+    // Ops live on the keypad when it's showing and on the chips when it isn't;
+    // the native-keyboard switch hides the keypad on a phone too, not just on
+    // desktop, so this keys off the keypad rather than the viewport width.
+    el.composer.dataset.nav = math ? 'keypad' : 'chips';
     el.kswitch.hidden = !(wanted && state.keyboard === 'native');
     syncDockHeight();
   }

@@ -109,6 +109,8 @@
       'keypad.show': 'Show keypad',
       'keypad.backspace': 'Backspace',
       'keypad.label': 'Math keypad',
+      'keypad.ops': 'ops',
+      'nav.change': 'Change operation',
 
       'entry.placeholder': 'Expression',
       'entry.compute': 'Compute',
@@ -223,6 +225,8 @@
       'keypad.show': 'Mostrar teclado',
       'keypad.backspace': 'Apagar',
       'keypad.label': 'Teclado matemático',
+      'keypad.ops': 'oper',
+      'nav.change': 'Trocar operação',
 
       'entry.placeholder': 'Expressão',
       'entry.compute': 'Calcular',

@@ -217,13 +217,48 @@ function check(name, ok, detail) {
 const GROUPS = {
   boot: async (s, app) => {
     await s.open(APP);
-    const seconds = await app.boot();
+    let seconds;
+    try {
+      seconds = await app.boot();
+    } catch (err) {
+      check('engine reaches ready', false, err.message);
+      return;
+    }
     check('engine reaches ready', true, `${seconds.toFixed(1)}s`);
     await app.enter('sin(x)^2');
     const card = await app.lastCard();
     check('derivative computes', card && !card.failed, card && card.text);
     check('result is 2sin(x)cos(x)', /2\s*sin\(x\)\s*cos\(x\)|sin\(2x\)/.test(card?.text || ''),
       card?.text);
+    check('no console errors', s.errors.length === 0, s.errors.join(' | '));
+  },
+
+  nav: async (s, app) => {
+    await s.open(APP);
+    await app.boot();
+
+    check('op page exists', await app.tapTab('op'));
+    check('integral key selects the integral op',
+      await app.tapKey('∫') && await app.currentOp() === 'integral');
+    check('op label shows the current op',
+      /integral|integral/i.test(await s.eval('document.querySelector(".oplabel")?.textContent || ""')));
+
+    // A coarse pointer means the keypad is showing, so chips must be hidden.
+    check('chips hidden while the keypad shows',
+      await s.eval('getComputedStyle(document.querySelector(".chips")).display === "none"'));
+
+    // Switching to the phone keyboard hides the keypad — ops must not vanish.
+    await s.eval('document.getElementById("kswitchBtn") && 0');
+    await s.eval(`(() => {
+      const keypad = document.getElementById('keypad');
+      keypad.hidden = true;
+      document.getElementById('composer').dataset.nav = 'chips';
+    })()`);
+    check('chips return when the keypad is hidden',
+      await s.eval('getComputedStyle(document.querySelector(".chips")).display !== "none"'));
+    check('a chip still switches op',
+      await app.tapChip('lim') && await app.currentOp() === 'limit');
+
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },
 };
