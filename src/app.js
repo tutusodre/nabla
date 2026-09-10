@@ -374,6 +374,7 @@
 
     for (const page of KEYPAD) {
       const tab = node('button', 'ktab', page.tab);
+      tab.dataset.page = page.id;
       tab.type = 'button';
       tab.setAttribute('role', 'tab');
       tab.setAttribute('aria-selected', String(page.id === state.keypadPage));
@@ -538,6 +539,7 @@
     renderChips();
     renderParams();
     schedulePreview();
+    window.__nablaOp = name;          // read by tools/smoke.mjs
   }
 
   /* caretOffset lands the cursor inside what was inserted — `sin()` wants it
@@ -1404,6 +1406,7 @@
     applyStaticStrings();
     renderChips();
     renderParams();
+    window.__nablaOp = state.op;
     renderKeypad();
     applyKeyboard();
     setKeypadOpen(true);
