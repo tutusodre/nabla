@@ -59,7 +59,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * mkdtemp moments earlier, so the file can only have been written by the
  * process we just spawned. */
 async function launchChrome(profile) {
+  const refused = [];
   for (const bin of CHROMES) {
+    /* A candidate that died after writing the file would leave its port
+     * behind for the next one to read, and reading a port nobody is listening
+     * on is how this suite ends up driving a stranger's browser. Clearing it
+     * keeps the invariant the comment above states: whatever is in that file
+     * was written by the process spawned on the line below it. */
+    await rm(join(profile, 'DevToolsActivePort'), { force: true });
     const child = spawn(bin, [
       '--headless=new', '--remote-debugging-port=0',
       `--user-data-dir=${profile}`, '--no-first-run', '--disable-gpu',
@@ -69,9 +76,23 @@ async function launchChrome(profile) {
       child.once('error', () => done(false));
       setTimeout(() => done(true), 300);
     });
-    if (started) return { child, endpoint: await readEndpoint(profile, child) };
+    if (!started) continue;
+    /* Spawning is not the same as working: a binary can exist, start, and
+     * never open a debugging port — a broken install, a Chrome too old for
+     * `--headless=new`, a profile it will not read. That is one candidate
+     * failing, not the search failing, so the loop moves on to the next name
+     * instead of the throw ending the run. The candidate that failed is
+     * killed on the way past — nothing downstream knows it exists. */
+    try {
+      return { child, endpoint: await readEndpoint(profile, child) };
+    } catch (err) {
+      refused.push(`${bin}: ${err.message}`);
+      child.kill();
+      await waitExit(child);
+    }
   }
-  throw new Error(`no Chrome found — tried ${CHROMES.join(', ')}`);
+  const why = refused.length ? ` (${refused.join('; ')})` : '';
+  throw new Error(`no Chrome found — tried ${CHROMES.join(', ')}${why}`);
 }
 
 async function readEndpoint(profile, child) {
@@ -264,6 +285,17 @@ function makeApp(s) {
         yMin: chart.options.scales.y.min,
         yMax: chart.options.scales.y.max,
       };
+    })()`),
+
+    /* The header, which only `buildTable` writes: the variable's own name and
+     * `f(` that name `)`. A plot answers the same op with a canvas and no
+     * table in the card at all, so this is the half of "a table rendered"
+     * that a card merely not failing cannot show. */
+    tableHead: () => s.eval(`(() => {
+      const card = document.querySelector('.card');
+      if (!card) return null;
+      return [...card.querySelectorAll('.vt thead th')]
+        .map((cell) => cell.textContent.trim());
     })()`),
 
     tableRows: () => s.eval(`(() => {
@@ -912,7 +944,10 @@ const GROUPS = {
     await app.setField('step', '1');
     await app.enter('x^2');
     let card = await app.lastCard();
-    check('a table over a range renders', card && !card.failed, card?.text);
+    const head = JSON.stringify(await app.tableHead());
+    check('a table over a range renders',
+      card && !card.failed && head === '["x","f(x)"]',
+      `${head} — ${card?.text}`);
 
     // Every row, both columns: the range is walked by the step, and each x is
     // squared. A wrong step or an off-by-one row shows up as a shorter list.
@@ -1067,24 +1102,37 @@ async function main() {
 
   const server = await serve();
   const profile = await mkdtemp(join(tmpdir(), 'nabla-smoke-'));
-  const { child: chrome, endpoint } = await launchChrome(profile);
-  const s = await connect(endpoint);
-  await s.ready;
-  await s.send('Runtime.enable');
-  await s.send('Log.enable');
-  await s.send('Page.enable');
-  const app = makeApp(s);
+  /* Everything the run owns is torn down by the one `finally` below, so
+   * everything the run owns is acquired inside the `try` that leads to it —
+   * including the browser. `connect()` sitting outside it is how a refused
+   * WrongBrowser used to leave a live headless Chrome, its profile directory
+   * and this server behind: the throw skipped the teardown entirely. The
+   * handles start null because the failure can happen before any of them
+   * exists. */
+  let chrome = null;
+  let s = null;
 
   try {
+    const launched = await launchChrome(profile);
+    chrome = launched.child;
+    s = await connect(launched.endpoint);
+    await s.ready;
+    await s.send('Runtime.enable');
+    await s.send('Log.enable');
+    await s.send('Page.enable');
+    const app = makeApp(s);
+
     for (const [name, run] of Object.entries(groups)) {
       console.log(`\n${name}`);
       await clearStorage(s);
       await run(s, app);
     }
   } finally {
-    s.ws.close();
-    chrome.kill();
-    await waitExit(chrome);
+    if (s) s.ws.close();
+    if (chrome) {
+      chrome.kill();
+      await waitExit(chrome);
+    }
     server.close();
     await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
