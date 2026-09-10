@@ -106,9 +106,15 @@ class MathError(Exception):
 # simply fall through to English instead of showing a missing-key marker.
 LANGUAGE = "en"
 
+# The last single-expression result, set at the top of compute() from the
+# incoming args. Can't live in LOCALS — that dict is built once at import.
+LAST_ANS = None
+
 MESSAGES = {
     "pt": {
         "Type an expression first.": "Digite uma expressão primeiro.",
+        "Nothing to reuse yet — compute something first.":
+            "Nada para reutilizar ainda — calcule algo primeiro.",
         "An equation needs an expression on both sides of `=`.":
             "Uma equação precisa de expressões dos dois lados do `=`.",
         "“%s” isn’t a valid variable name.":
@@ -223,11 +229,18 @@ def _t(text):
 # parsing
 # --------------------------------------------------------------------------
 
-def _parse(src):
+def _parse(src, extra=None):
     text = (src or "").strip()
     if not text:
         raise MathError("Type an expression first.")
-    expr = parse_expr(text, local_dict=LOCALS, transformations=TRANSFORMS)
+    names = LOCALS if extra is None else {**LOCALS, **extra}
+    # Substring test on purpose: it's cheap, and a false positive (a variable
+    # named `answer`) only means the binding is present but unused.
+    if "ans" in text:
+        if LAST_ANS is None:
+            raise MathError("Nothing to reuse yet — compute something first.")
+        names = {**names, "ans": LAST_ANS}
+    expr = parse_expr(text, local_dict=names, transformations=TRANSFORMS)
     return sp.sympify(expr)
 
 
@@ -1093,6 +1106,7 @@ def set_language(lang):
 
 def compute(op, args_json, lang="en"):
     """Single entry point. Always returns a JSON string, never raises."""
+    global LAST_ANS
     set_language(lang)
     try:
         handler = OPERATIONS[op]
@@ -1101,6 +1115,10 @@ def compute(op, args_json, lang="en"):
 
     try:
         args = json.loads(args_json) if args_json else {}
+        previous = args.pop("ans", None)
+        # Parsed inside this try on purpose: a malformed stored answer becomes
+        # an ordinary translated error instead of crashing the worker.
+        LAST_ANS = _parse(previous) if previous else None
         return json.dumps({"ok": True, "data": handler(**args)})
     except Exception as exc:  # noqa: BLE001 — every failure must reach the user
         return json.dumps({"ok": False, "error": _friendly(exc)})

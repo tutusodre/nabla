@@ -115,6 +115,11 @@
 
   const OP_ORDER = ['derivative', 'integral', 'limit', 'simplify', 'substitute', 'solve', 'plot', 'table'];
 
+  /* Ops whose result is a single expression, so it can be reused as `ans`.
+   * solve is out because "the answer" is ambiguous with several roots;
+   * plot and table are out because they aren't scalars. */
+  const ANS_OPS = new Set(['derivative', 'integral', 'limit', 'simplify', 'substitute']);
+
   /* Keypad pages. A key is [label, spec]: a plain string inserts literally,
    * {fn} inserts `name()` with the caret inside, {act} runs an action. */
   const KEYPAD = [
@@ -146,7 +151,7 @@
         ['1', '1'], ['2', '2'], ['3', '3'], ['×', '*'], ['−', '-'],
         ['0', '0'], ['.', '.'], ['x', 'x'], [',', ','], ['+', '+'],
         ['◀', { act: 'left', repeat: true }], ['▶', { act: 'right', repeat: true }],
-        ['π', 'pi'], ['=', '='], ['⏎', { act: 'enter', wide: true }],
+        ['ans', 'ans'], ['=', '='], ['⏎', { act: 'enter', wide: true }],
       ],
     },
     {
@@ -255,11 +260,19 @@
     }
   }
 
+  /* state.entries is chronological (oldest first, see addEntry) — findLast
+   * walks from the end so this is the most recent qualifying entry, without
+   * mutating or copying the array. */
+  function lastAnswer() {
+    const entry = state.entries.findLast((item) => item.ok && ANS_OPS.has(item.op));
+    return entry && entry.data ? entry.data.text : null;
+  }
+
   function call(op, args) {
     return new Promise((resolve) => {
       const id = ++sequence;
       pending.set(id, resolve);
-      worker.postMessage({ id, op, args, lang: window.NablaI18n.lang });
+      worker.postMessage({ id, op, args: { ...args, ans: lastAnswer() }, lang: window.NablaI18n.lang });
     });
   }
 

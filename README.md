@@ -153,6 +153,9 @@ shed and the write retried.
 - Leave both integral bounds empty for an indefinite integral.
 - Plot takes up to four comma-separated functions; commas inside a call like
   `log(x, 2)` are handled.
+- `ans` is the last single-expression result — derivative, integral, limit,
+  simplify or substitute. Solve is excluded because "the answer" is ambiguous
+  with several roots, and plots and tables are not single values.
 
 ## Regenerating icons
 

@@ -313,6 +313,32 @@ const GROUPS = {
 
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },
+
+  ans: async (s, app) => {
+    await s.open(APP);
+    await app.boot();
+
+    await app.tapTab('op');
+    await app.tapKey('d/dx');
+    await app.enter('x^3');
+    let card = await app.lastCard();
+    check('seed result computed', card && !card.failed, card?.text);
+
+    await app.enter('ans + 1');
+    card = await app.lastCard();
+    check('ans chains from the last result',
+      card && !card.failed && /3x/.test(card.text), card?.text);
+
+    await s.eval('localStorage.clear()');
+    await s.open(APP);
+    await app.boot();
+    await app.enter('ans + 1');
+    card = await app.lastCard();
+    check('ans with no history explains itself',
+      card && card.failed && /reuse|reutilizar/i.test(card.text), card?.text);
+
+    check('no console errors', s.errors.length === 0, s.errors.join(' | '));
+  },
 };
 
 async function main() {
