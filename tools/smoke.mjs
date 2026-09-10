@@ -456,6 +456,97 @@ const GROUPS = {
 
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },
+
+  constants: async (s, app) => {
+    await s.open(APP);
+    await app.boot();
+    await app.tapTab('op');
+    await app.tapKey('x = a');
+
+    /* Planck's constant times a frequency is an energy. The number is the
+     * assertion: `h` read as an ordinary symbol leaves h*5e14*Hz, which is
+     * not 3.313035075e-19 J and not anything else recognisable. */
+    await app.setField('at', 'f = 5e14 Hz');
+    await app.enter('h*f');
+    let card = await app.lastCard();
+    check('a constant resolves with units',
+      card && !card.failed && /3\.313035075/.test(card.text) && /J/.test(card.text),
+      card?.text);
+
+    await app.setField('at', 'm = 1 kg');
+    await app.enter('m*c^2');
+    card = await app.lastCard();
+    check('c is the speed of light',
+      card && !card.failed && /89875517873681764/.test(card.text), card?.text);
+
+    /* The rule that keeps `c` usable as a constant of integration: a name you
+     * bind yourself is yours. Two times three squared is eighteen. */
+    await app.setField('at', 'm = 2, c = 3');
+    await app.enter('m*c^2');
+    card = await app.lastCard();
+    check('a binding beats the physical value',
+      card && !card.failed && /\b18\b/.test(card.text), card?.text);
+
+    /* SymPy has no named SI unit for what k_B measures, so folding leaves it
+     * alone — the answer still has to be a number rather than "k_B". */
+    await app.setField('at', 'T = 300 K');
+    await app.enter('k_B*T');
+    card = await app.lastCard();
+    check('a constant with no SI unit still gives a number',
+      card && !card.failed && /4\.141947/.test(card.text), card?.text);
+
+    /* N_A times an amount is a pure count: nothing folds and nothing is left
+     * over. The unfolded form is also shown, so its printing is on trial. */
+    await app.setField('at', 'n = 2 mol');
+    await app.enter('N_A*n');
+    card = await app.lastCard();
+    check('N_A counts a mole',
+      card && !card.failed && /1\.20442815/.test(card.text), card?.text);
+
+    await app.setField('at', 'U = 1 V');
+    await app.enter('q_e*U');
+    card = await app.lastCard();
+    check('q_e is the elementary charge',
+      card && !card.failed && /1\.602176634/.test(card.text), card?.text);
+
+    /* `e` stays Euler's number: the elementary charge is spelled q_e because
+     * reassigning e would change every e^x already in someone's history. */
+    await app.setField('at', 'x = 1');
+    await app.enter('e^x');
+    card = await app.lastCard();
+    check('e is still Euler’s number',
+      card && !card.failed && /2\.718/.test(card.text), card?.text);
+
+    /* One expression, both meanings of g: a gram on the right of a binding,
+     * gravity in the expression. 0.5 kg * 9.80665 m/s^2 = 4.903325 N. */
+    await app.setField('at', 'm = 500 g');
+    await app.enter('m*g');
+    card = await app.lastCard();
+    check('g is a gram in a binding and gravity in an expression',
+      card && !card.failed && /4\.903325/.test(card.text) && /N/.test(card.text),
+      card?.text);
+
+    /* `h` is an hour on the right of a binding for the same reason. */
+    await app.setField('at', 't = 2 h');
+    await app.enter('t');
+    card = await app.lastCard();
+    check('h still means an hour in a binding',
+      card && !card.failed && /7200/.test(card.text), card?.text);
+
+    /* The page keeps its id — renaming it would orphan the saved keypad page
+     * in every install — and only its tab label changes. */
+    check('the names tab is labelled', /names|nomes/.test(await s.eval(`(() => {
+      const tab = [...document.querySelectorAll('#keypadTabs button')]
+        .find((b) => b.dataset.page === 'var');
+      return tab ? tab.textContent.trim() : '';
+    })()`)));
+    await app.tapTab('var');
+    check('names page has the constants', await app.tapKey('ℏ'));
+    check('names page has π back', await app.tapKey('π'));
+    check('names page still has the Greek letters', await app.tapKey('θ'));
+
+    check('no console errors', s.errors.length === 0, s.errors.join(' | '));
+  },
 };
 
 async function main() {

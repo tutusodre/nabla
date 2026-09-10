@@ -115,6 +115,7 @@
       'keypad.backspace': 'Backspace',
       'keypad.label': 'Math keypad',
       'keypad.ops': 'ops',
+      'keypad.names': 'names',
       'nav.change': 'Change operation',
 
       'entry.placeholder': 'Expression',
@@ -236,6 +237,7 @@
       'keypad.backspace': 'Apagar',
       'keypad.label': 'Teclado matemático',
       'keypad.ops': 'oper',
+      'keypad.names': 'nomes',
       'nav.change': 'Trocar operação',
 
       'entry.placeholder': 'Expressão',

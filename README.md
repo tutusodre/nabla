@@ -163,6 +163,17 @@ shed and the write retried.
   SI prefixes come along (`4.7 kohm`, `2 mA`, `2.4 GHz`), and the answer is
   folded back to SI: `90 km/h` reads as `25 m/s`, `4.7 kohm · 2 mA` as
   `9.4 V`, with the unfolded form kept as an alternate.
+- Physical constants — `c`, `h`, `hbar`, `k_B`, `G`, `g`, `mu_0`, `epsilon_0`,
+  `N_A`, `m_e`, `q_e` — read as named symbols in an expression and resolve to
+  values with units inside a substitute: `m*c^2` with `m = 1 kg` is
+  `89875517873681764 J`. A name you bind yourself is yours, so `c = 3` means
+  three — which is what keeps `c` usable as a constant of integration, and `g`,
+  `h` and `G` as ordinary variables. The elementary charge is `q_e`, not `e`:
+  `e` is Euler's number, and reassigning it would change the meaning of every
+  `e^x` already written.
+  The constants are a namespace of their own, not part of the unit one, so on
+  the right of a binding `h` is still an hour and `g` still a gram —
+  `m = 500 g` with `m*g` is `4.903325 N`.
 
 ## Regenerating icons
 

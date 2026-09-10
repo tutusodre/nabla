@@ -10,7 +10,7 @@
 importScripts('./src/pyodide-pin.js');
 
 /* Bumped on every deploy: it only ever discards the shell, which is a few kB. */
-const VERSION = 'v6';
+const VERSION = 'v7';
 
 /* Bumped only when a pinned vendor URL moves. The vendor payload is ~25 MB of
  * Pyodide and SymPy, so tying its cache name to the deploy version would throw

@@ -179,9 +179,14 @@
         ['x²', '^2'], ['x⁻¹', '^-1'],
       ],
     },
+    /* Keeps the id 'var' although the tab now reads "names": the id is what
+     * KEYPAD_PAGE_KEY has stored in every install, and renaming it would
+     * orphan that saved page. Six rows, one more than the numeric page — the
+     * eleven constants and π earn it, and pages already differ in height. */
     {
       id: 'var',
-      tab: 'abc',
+      tab: 'keypad.names',
+      tabI18n: true,
       cols: 6,
       keys: [
         ['x', 'x'], ['y', 'y'], ['z', 'z'], ['t', 't'], ['n', 'n'], ['k', 'k'],
@@ -189,6 +194,9 @@
         ['α', 'alpha'], ['β', 'beta'],
         ['λ', 'lamda'], ['μ', 'mu'], ['σ', 'sigma'], ['ε', 'epsilon'],
         ['ρ', 'rho'], ['δ', 'delta'],
+        ['π', 'pi'], ['c', 'c'], ['h', 'h'], ['ℏ', 'hbar'], ['G', 'G'], ['g', 'g'],
+        ['k_B', 'k_B'], ['N_A', 'N_A'], ['q_e', 'q_e'], ['m_e', 'm_e'],
+        ['μ₀', 'mu_0'], ['ε₀', 'epsilon_0'],
         ['keypad.native', { act: 'native', full: true, i18n: true }],
       ],
     },

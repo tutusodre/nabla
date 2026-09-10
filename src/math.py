@@ -16,6 +16,7 @@ from sympy.parsing.sympy_parser import (
     parse_expr,
     standard_transformations,
 )
+from sympy.printing.latex import LatexPrinter
 from sympy.printing.str import StrPrinter
 
 TRANSFORMS = standard_transformations + (
@@ -44,6 +45,41 @@ _CONSTANTS = {
     "I": sp.I,
     "nan": sp.nan,
 }
+
+# Physical constants: the name this app reads, SymPy's own attribute, and how
+# the value prints. They are not in _CONSTANTS because they are not constants
+# to the parser — each one reads as an ordinary Symbol, and only a substitute
+# turns it into a value (see op_substitute). That is what keeps `c` usable as
+# a constant of integration and `g` as a plain variable.
+#
+# The elementary charge is `q_e`, not `e`: `e` is Euler's number, and taking
+# that name would silently change the meaning of every `e^x` already sitting
+# in someone's stored history.
+#
+# The LaTeX column is not decoration. SymPy renders a Quantity as its
+# abbreviation inside \text{}, and four of these abbreviate to their own
+# snake_case name — `\text{boltzmann_constant}` is a KaTeX parse error, not a
+# symbol — while the rest abbreviate to something this app does not call them
+# (`me`, and `e` for the elementary charge).
+_PHYSICAL = {
+    "c": ("speed_of_light", "c"),
+    "h": ("planck", "h"),
+    "hbar": ("hbar", r"\hbar"),
+    "k_B": ("boltzmann_constant", "k_{B}"),
+    "G": ("gravitational_constant", "G"),
+    "mu_0": ("magnetic_constant", r"\mu_{0}"),
+    "epsilon_0": ("vacuum_permittivity", r"\varepsilon_{0}"),
+    "N_A": ("avogadro_constant", "N_{A}"),
+    "m_e": ("electron_rest_mass", "m_{e}"),
+    "q_e": ("elementary_charge", "q_{e}"),
+    "g": ("acceleration_due_to_gravity", "g"),
+}
+
+# Keyed by SymPy's spelling, which is how a Quantity names itself when asked.
+_PHYSICAL_BY_SYMPY = {
+    attr: (name, latex) for name, (attr, latex) in _PHYSICAL.items()
+}
+
 
 def _log_base10(value, base=None):
     """`log` means base 10 here; `ln` is the natural log.
@@ -78,9 +114,13 @@ _FUNCTIONS = {
     "cotg": sp.cot, "cossec": sp.csc,
 }
 
-# Order matters: constants shadow bare symbols, functions shadow both.
+# Order matters: constants shadow bare symbols, functions shadow both. The
+# physical names sit with the bare symbols because that is what they are here —
+# `hbar` needs the entry or split_symbols shreds it into h*b*a*r, and the rest
+# are ordinary variables until a substitute resolves them.
 LOCALS = {}
 LOCALS.update(_SYMBOLS)
+LOCALS.update({name: sp.Symbol(name) for name in _PHYSICAL})
 LOCALS.update(_CONSTANTS)
 LOCALS.update(_FUNCTIONS)
 
@@ -256,11 +296,11 @@ def _parse(src, extra=None):
     # dimensions are an error, not a silent number" is not substitute's promise
     # alone: `ans + 1` on 29.43 m/s has to fail here too.
     #
-    # The cache is empty until some binding value contained a letter, and only
-    # `_unit_names()` ever builds a Quantity, so an empty one rules units out
-    # cheaply. A full one rules nothing in — `a = 2c` fills it — and parse_expr
-    # can hand back a list or a Boolean, neither of which has atoms to scan.
-    if _UNIT_CACHE and isinstance(expr, sp.Expr) and _has_units(expr):
+    # Nothing has built a Quantity until a binding value held a letter or a
+    # substitute resolved a constant, so `_quantities_possible()` rules units
+    # out cheaply. It rules nothing in — `a = 2c` arms it — and parse_expr can
+    # hand back a list or a Boolean, neither of which has atoms to scan.
+    if _quantities_possible() and isinstance(expr, sp.Expr) and _has_units(expr):
         _check_dimensions(expr)
     return expr
 
@@ -444,6 +484,45 @@ def _unit_names():
     return _UNIT_CACHE
 
 
+_PHYSICAL_CACHE = {}
+
+
+def _physical_names():
+    """The physical constants as Quantity objects. Built once, on first use.
+
+    Deliberately a separate table from the unit namespace rather than folded
+    into it. `h` is an hour and `g` a gram on the right of a binding — that is
+    what `v = 90 km/h` and `m = 500 g` mean — and merging the two dicts would
+    quietly redefine both. The constants are resolved against the expression
+    instead, where no unit name is in scope.
+    """
+    if _PHYSICAL_CACHE:
+        return _PHYSICAL_CACHE
+
+    # Imported here, not at module scope, for the reason _unit_names gives:
+    # boot time is a headline property and most sessions never touch this.
+    from sympy.physics import units as u
+
+    # No default on the getattr, deliberately, and the same reason as there: a
+    # constant SymPy had moved would otherwise vanish silently, and `m_e*c^2`
+    # would come back as a symbolic product that looks like an answer.
+    _PHYSICAL_CACHE.update(
+        {name: getattr(u, attr) for name, (attr, _) in _PHYSICAL.items()}
+    )
+    return _PHYSICAL_CACHE
+
+
+def _quantities_possible():
+    """True once anything in this session could have put a Quantity in play.
+
+    Only these two tables ever build one, and neither has run while both are
+    empty — so two empty dicts rule units out without importing anything or
+    scanning an expression. Non-empty rules nothing in: `a = 2c` fills the unit
+    cache with no unit in sight, and the caches stay filled afterwards.
+    """
+    return bool(_UNIT_CACHE) or bool(_PHYSICAL_CACHE)
+
+
 # A value with no letter in it cannot name a unit, so `x = 2` skips the unit
 # namespace — and the import behind it — entirely.
 _HAS_LETTER_RE = re.compile(r"[^\W\d_]")
@@ -526,16 +605,65 @@ def _to_si(expr):
     from sympy.physics.units.util import quantity_simplify
 
     try:
-        return quantity_simplify(expr, across_dimensions=True, unit_system=SI)
+        folded = quantity_simplify(expr, across_dimensions=True, unit_system=SI)
     except Exception:
         # Normalising is a courtesy — the substitution already answered the
         # question, and its dimensions were checked before we got here.
         return expr
+    return _expand_constants(folded)
+
+
+# The seven SI base units, which every constant can be written in terms of.
+_SI_BASE = ("kilogram", "meter", "second", "ampere", "kelvin", "mole", "candela")
+
+
+def _expand_constants(expr):
+    """Give a constant folding could not name its number, in base units.
+
+    `_to_si` folds a dimension SymPy has an SI unit for — h*f is a joule, and
+    that is the form worth showing. It has no unit for what `h` alone measures,
+    though, so `h` survives folding untouched and the answer to `h` would be
+    `h`. Rewriting the leftovers in kg, m, s, A, K, mol and cd is what turns
+    those back into numbers — `N_A * 2 mol` into a count rather than a symbol.
+    """
+    if not _PHYSICAL_CACHE or not isinstance(expr, sp.Expr):
+        return expr
+
+    from sympy.physics.units import Quantity
+
+    left = {q for q in expr.atoms(Quantity) if str(q.name) in _PHYSICAL_BY_SYMPY}
+    if not left:
+        return expr
+
+    from sympy.physics.units.systems.si import SI
+    from sympy.physics.units.util import convert_to
+
+    units = _unit_names()
+    try:
+        expanded = convert_to(expr, [units[name] for name in _SI_BASE], unit_system=SI)
+    except Exception:
+        return expr
+    # convert_to returns the input unchanged when it cannot do the conversion,
+    # and a half-expanded answer is worse than the folded one.
+    if not isinstance(expanded, sp.Expr) or expanded.atoms(Quantity) & left:
+        return expr
+    return expanded
 
 
 # --------------------------------------------------------------------------
 # formatting helpers
 # --------------------------------------------------------------------------
+
+def _is_quantity(expr):
+    """True for a Quantity, without importing the units module to ask.
+
+    The class name alone is not the test: SymPy's physical constants are a
+    Quantity subclass called PhysicalConstant. This sits in front of every node
+    the LaTeX printer visits, so it stays a walk over a short tuple of names
+    rather than an import at module scope.
+    """
+    return any(base.__name__ == "Quantity" for base in type(expr).__mro__)
+
 
 class _NablaStrPrinter(StrPrinter):
     """SymPy's internal natural log is `log`; here `log` means base 10.
@@ -551,12 +679,42 @@ class _NablaStrPrinter(StrPrinter):
         # Copied text should paste back into this app's own input syntax.
         return "e"
 
+    def _print_Quantity(self, expr):
+        # Same rule: an answer holding Planck's constant has to copy — and come
+        # back through `ans` — as `h`, which this app reads. SymPy calls it
+        # `planck`, which is a name in none of these namespaces and would be
+        # shredded into a product of six letters on the way back in.
+        known = _PHYSICAL_BY_SYMPY.get(str(expr.name))
+        return known[0] if known else super()._print_Quantity(expr)
+
 
 _STR_PRINTER = _NablaStrPrinter()
 
 
+class _NablaLatexPrinter(LatexPrinter):
+    """Prints the physical constants the way this app spells them.
+
+    Quantity carries its own `_latex` method, and the base printer reaches that
+    before any `_print_Quantity` a subclass could define — so the intercept has
+    to happen in `_print` itself. What it replaces is worth replacing: SymPy
+    renders a Quantity as its abbreviation inside \\text{}, so the Boltzmann
+    constant comes out as `\\text{boltzmann_constant}`, and an underscore in
+    text mode is a KaTeX parse error rather than a subscript.
+    """
+
+    def _print(self, expr, **kwargs):
+        if _is_quantity(expr):
+            known = _PHYSICAL_BY_SYMPY.get(str(expr.name))
+            if known:
+                return known[1]
+        return super()._print(expr, **kwargs)
+
+
+_LATEX_PRINTER = _NablaLatexPrinter({"ln_notation": True})
+
+
 def _latex(expr):
-    return sp.latex(expr, ln_notation=True)
+    return _LATEX_PRINTER.doprint(expr)
 
 
 def _text(expr):
@@ -612,9 +770,9 @@ def _decimal_alternate(expr):
 
     # Not every result is an ordinary expression: `x > 1` substitutes to a
     # Boolean and a list stays a list, and neither has a coefficient to split
-    # off. The cache being non-empty says only that some binding value held a
-    # letter — `a = 2c` fills it — so it cannot stand in for that test.
-    if not _UNIT_CACHE or not isinstance(expr, sp.Expr) or expr.free_symbols:
+    # off. A Quantity being possible says only that: `a = 2c` arms it with no
+    # unit in sight, so it cannot stand in for that test.
+    if not _quantities_possible() or not isinstance(expr, sp.Expr) or expr.free_symbols:
         return None
 
     try:
@@ -1131,10 +1289,30 @@ def op_substitute(source="", at=""):
 
     # simultaneous keeps `x = y, y = x` a swap rather than a cascade.
     result = expr.subs(pairs, simultaneous=True)
-    # Only `_unit_names()` ever builds a Quantity, and it has not run while the
-    # cache is empty — so an empty cache rules units out. A full one rules
-    # nothing in: any binding value holding a letter fills it, units or not.
-    has_units = bool(_UNIT_CACHE) and _has_units(result)
+
+    # A name you bind yourself is yours: `c = 3` means three, not the speed of
+    # light. Running after the bindings is what enforces that — a bound name is
+    # already gone from the result — and `bound` covers the leftovers, so that
+    # `c = 2c` keeps the c the user meant. The statement still shows what was
+    # typed, because it is `expr` that is echoed there, not this.
+    #
+    # The test is a string comparison against names already in hand: an
+    # expression with no constant in it never builds the table, let alone
+    # imports it.
+    bound = {sym.name for sym, _ in pairs}
+    if isinstance(result, sp.Basic):
+        wanted = {
+            sym for sym in result.free_symbols
+            if sym.name in _PHYSICAL and sym.name not in bound
+        }
+        if wanted:
+            values = _physical_names()
+            result = result.subs({sym: values[sym.name] for sym in wanted})
+
+    # Only these two tables ever build a Quantity, and neither has run while
+    # both are empty — so empty rules units out. Full rules nothing in: any
+    # binding value holding a letter fills the unit one, units or not.
+    has_units = _quantities_possible() and _has_units(result)
 
     if has_units:
         _check_dimensions(result)
