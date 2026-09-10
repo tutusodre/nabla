@@ -18,8 +18,8 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PORT = 8791;
-const CDP_PORT = 9334;
-const APP = `http://127.0.0.1:${PORT}/index.html`;
+const ORIGIN = `http://127.0.0.1:${PORT}`;
+const APP = `${ORIGIN}/index.html`;
 const CHROMES = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'];
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
@@ -47,21 +47,50 @@ function serve() {
 
 /* ---------------------------------------------------------------- chrome -- */
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* Chrome picks the port, we do not. A fixed one is a hijack waiting to happen:
+ * `connect()` drives whatever answers there, and a headless survivor from an
+ * earlier run answers with its own localStorage attached — which is how this
+ * suite once produced a red/green transcript that had nothing to do with the
+ * code under test. With `--remote-debugging-port=0` Chrome binds a free port
+ * and writes it, with the path of the browser target it is serving, into
+ * DevToolsActivePort inside the profile directory. That directory was made by
+ * mkdtemp moments earlier, so the file can only have been written by the
+ * process we just spawned. */
 async function launchChrome(profile) {
   for (const bin of CHROMES) {
     const child = spawn(bin, [
-      '--headless=new', `--remote-debugging-port=${CDP_PORT}`,
+      '--headless=new', '--remote-debugging-port=0',
       `--user-data-dir=${profile}`, '--no-first-run', '--disable-gpu',
       '--window-size=430,900', 'about:blank',
     ], { stdio: 'ignore' });
-    const ok = await new Promise((done) => {
+    const started = await new Promise((done) => {
       child.once('error', () => done(false));
       setTimeout(() => done(true), 300);
     });
-    if (ok) return child;
+    if (started) return { child, endpoint: await readEndpoint(profile, child) };
   }
   throw new Error(`no Chrome found — tried ${CHROMES.join(', ')}`);
 }
+
+async function readEndpoint(profile, child) {
+  const file = join(profile, 'DevToolsActivePort');
+  for (let i = 0; i < 200; i += 1) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error('Chrome exited before it opened a debugging port');
+    }
+    try {
+      const [port, path] = (await readFile(file, 'utf8')).trim().split('\n');
+      if (port && path) return { port: Number(port), path: path.trim() };
+    } catch { /* not written yet */ }
+    await sleep(100);
+  }
+  throw new Error('Chrome never wrote DevToolsActivePort');
+}
+
+/* A port answering is not the same as our browser answering. */
+class WrongBrowser extends Error {}
 
 function waitExit(child, ms = 5000) {
   return new Promise((resolve) => {
@@ -71,14 +100,31 @@ function waitExit(child, ms = 5000) {
   });
 }
 
-async function connect() {
+async function connect(endpoint) {
+  const base = `http://127.0.0.1:${endpoint.port}`;
   for (let i = 0; i < 60; i += 1) {
     try {
-      const list = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`)).json();
+      // Belt to the port's braces: the endpoint has to be serving the browser
+      // target our own Chrome named in DevToolsActivePort. Anything else — a
+      // survivor of a killed run, a browser somebody else left open, a proxy —
+      // is refused rather than driven, and refused loudly: silently testing a
+      // stranger's browser is what this whole check exists to stop.
+      const version = await (await fetch(`${base}/json/version`)).json();
+      const path = new URL(version.webSocketDebuggerUrl).pathname;
+      if (path !== endpoint.path) {
+        throw new WrongBrowser(
+          `port ${endpoint.port} is serving ${path}, not the browser this run `
+          + `launched (${endpoint.path}) — refusing to drive it`,
+        );
+      }
+      const list = await (await fetch(`${base}/json/list`)).json();
       const page = list.find((t) => t.type === 'page');
       if (page) return new Session(page.webSocketDebuggerUrl);
-    } catch { /* not up yet */ }
-    await new Promise((r) => setTimeout(r, 250));
+    } catch (err) {
+      if (err instanceof WrongBrowser) throw err;
+      /* not up yet */
+    }
+    await sleep(250);
   }
   throw new Error('Chrome never exposed a page target');
 }
@@ -101,6 +147,14 @@ class Session {
       }
       if (msg.method === 'Runtime.exceptionThrown') {
         this.errors.push(msg.params.exceptionDetails.text);
+      }
+      // Log.entryAdded is the browser's own log — network, security, deprecated
+      // APIs — and carries nothing the page wrote. A console.error() from the
+      // app arrives here instead, so without this the "no console errors"
+      // assertion in every group below only ever saw uncaught exceptions.
+      if (msg.method === 'Runtime.consoleAPICalled' && msg.params.type === 'error') {
+        this.errors.push((msg.params.args || [])
+          .map((a) => a.description || a.value || a.type).join(' '));
       }
     });
   }
@@ -172,9 +226,21 @@ function makeApp(s) {
 
     currentOp: () => s.eval('window.__nablaOp || null'),
 
+    /* Two field shapes, because the app has two. A text field carries its
+     * value on `.value` and the app listens for `input`; a `check` field
+     * carries it on `.checked` and the app listens for `change`. Setting
+     * `.value` on a checkbox changes the string it would submit and nothing
+     * else — the box stays unticked and no handler runs — which is why
+     * solve's `complex_roots` went untested for as long as this only knew the
+     * one shape. */
     setField: (name, value) => s.eval(`(() => {
       const field = document.getElementById('f-' + ${json(name)});
       if (!field) return false;
+      if (field.type === 'checkbox') {
+        field.checked = Boolean(${json(value)});
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      }
       field.value = ${json(value)};
       field.dispatchEvent(new Event('input', { bubbles: true }));
       return true;
@@ -204,6 +270,19 @@ function makeApp(s) {
 }
 
 /* ----------------------------------------------------------------- runner -- */
+
+/* Every group starts on an empty store. History, language and the remembered
+ * op all live in localStorage, so without this a group inherits whatever the
+ * one before it left — `ans` most of all, which is a stored answer by
+ * definition. Done through the browser rather than the page: Storage works on
+ * an origin, so it needs no document open on it and cannot race a navigation
+ * the way `localStorage.clear()` in a just-navigated page can. */
+async function clearStorage(s) {
+  const res = await s.send('Storage.clearDataForOrigin', {
+    origin: ORIGIN, storageTypes: 'local_storage',
+  });
+  if (res.error) throw new Error(`could not clear localStorage: ${res.error.message}`);
+}
 
 let passed = 0;
 let failed = 0;
@@ -655,8 +734,8 @@ async function main() {
 
   const server = await serve();
   const profile = await mkdtemp(join(tmpdir(), 'nabla-smoke-'));
-  const chrome = await launchChrome(profile);
-  const s = await connect();
+  const { child: chrome, endpoint } = await launchChrome(profile);
+  const s = await connect(endpoint);
   await s.ready;
   await s.send('Runtime.enable');
   await s.send('Log.enable');
@@ -666,6 +745,7 @@ async function main() {
   try {
     for (const [name, run] of Object.entries(groups)) {
       console.log(`\n${name}`);
+      await clearStorage(s);
       await run(s, app);
     }
   } finally {
