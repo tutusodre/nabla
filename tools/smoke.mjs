@@ -407,6 +407,19 @@ const GROUPS = {
       card && !card.failed && /\b243\b/.test(card.text)
         && !/Quantity|sequence/i.test(card.text), card?.text);
 
+    /* Adding units must not take the decimal away. This coefficient is 4*pi,
+     * and `as_coeff_Mul()` split that into the integer 4 — which the guard
+     * against a spurious "2.0 kg" then swallowed, leaving 4*pi*meter**2 with
+     * no decimal beside it while unit-free `r = 2` offered 12.5663706144. The
+     * exact form has to survive too: a decimal that replaced the answer rather
+     * than joining it would be a different bug. */
+    await app.setField('at', 'r = 2 m');
+    await app.enter('pi*r^2');
+    card = await app.lastCard();
+    check('an irrational coefficient keeps its decimal once units are on it',
+      card && !card.failed && /decimal/i.test(card.text) && /12\.56637/.test(card.text)
+        && /pi|π/.test(card.text), card?.text);
+
     /* Everything below runs with the unit namespace already built, which is
      * the state that used to break these: a result that is not an ordinary
      * expression has no coefficient to split and no atoms to scan. Order

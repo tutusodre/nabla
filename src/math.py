@@ -916,19 +916,33 @@ def _decimal_alternate(expr):
         return {"label": _t("decimal"), "latex": plain, "text": plain}
 
     # Not every result is an ordinary expression: `x > 1` substitutes to a
-    # Boolean and a list stays a list, and neither has a coefficient to split
-    # off. A Quantity being possible says only that: `a = 2c` arms it with no
-    # unit in sight, so it cannot stand in for that test.
+    # Boolean, and a Boolean has no coefficient to split off. A Quantity being
+    # possible says only that: `a = 2c` arms it with no unit in sight, so it
+    # cannot stand in for that test.
     if not _quantities_possible() or not isinstance(expr, sp.Expr) or expr.free_symbols:
         return None
 
     try:
-        coeff, units = expr.as_coeff_Mul()
-        # A coefficient of 1 means there was no number out front to round — an
-        # unfolded sum of unit terms, say — and an integer one is already exact.
-        if coeff == 1 or coeff.is_Integer or not _has_units(units):
+        # Split by what carries a unit, not by `as_coeff_Mul()`. That splits off
+        # a Rational and leaves everything else with the units, so `4*pi*m^2`
+        # arrives as coeff 4 — an integer, nothing to round — and `sqrt(13)*m`
+        # as coeff 1. Both are exactly the answers most in need of a decimal,
+        # and both used to fall through the guards below and offer none, while
+        # the same sums without units offered one.
+        number, units = sp.S.One, sp.S.One
+        for factor in sp.Mul.make_args(expr):
+            if _has_units(factor):
+                units *= factor
+            else:
+                number *= factor
+
+        # No unit factor means no number was held back from `_approx` above, so
+        # there is nothing here it did not already decline. An integer is
+        # already exact, and a bare 1 is what an unfolded sum of unit terms
+        # leaves behind — neither is worth a second line.
+        if units == 1 or number.is_Integer:
             return None
-        decimal = _approx(coeff)
+        decimal = _approx(number)
         if decimal is None:
             return None
         shown = sp.Float(decimal) * units
