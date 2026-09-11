@@ -398,6 +398,24 @@ code {
   border-right: var(--rule-w) solid var(--rule-strong);
 }
 
+/* Sits under the result plate, quieter than it: the terms are the answer,
+ * this is the pattern behind them. */
+.card__closed {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: var(--rule-w) dotted var(--rule);
+  overflow-x: auto;
+}
+.card__closedLabel {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ink-faint);
+  font-family: var(--serif);
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
 .card__note {
   margin: 10px 0 0;
   font-size: 12px;

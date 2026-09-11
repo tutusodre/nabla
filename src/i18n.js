@@ -93,6 +93,7 @@
 
       'card.failed': '%1 — failed',
       'card.genericError': 'Something went wrong.',
+      'card.asSum': 'as a sum',
       'card.truncated': 'Showing the first 400 rows.',
       'card.hiddenComplex': '%1 complex root(s) hidden — turn on “complex” to include them.',
       'card.plotFailed': 'Couldn’t draw this plot.',
@@ -217,6 +218,7 @@
 
       'card.failed': '%1 — falhou',
       'card.genericError': 'Algo deu errado.',
+      'card.asSum': 'como soma',
       'card.truncated': 'Mostrando as primeiras 400 linhas.',
       'card.hiddenComplex': '%1 raiz(es) complexa(s) ocultas — ative “complexo” para incluí-las.',
       'card.plotFailed': 'Não consegui desenhar este gráfico.',

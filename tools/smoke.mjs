@@ -997,6 +997,22 @@ const GROUPS = {
     check('the bounded form is still offered', card && /remainder|resto/i.test(card.text),
       card?.text);
 
+    /* The same expansion as one sigma, under the terms. sin(x) has a closed
+     * form; SymPy finds none for most functions, which is not an error. */
+    const sum = await s.eval(
+      `document.querySelector('.card')?.querySelector('.card__closed')
+         ?.innerText.replace(/\\s+/g, ' ') || ''`);
+    check('the closed form is shown as a sum', /AS A SUM|COMO SOMA/i.test(sum), sum);
+    check('and it is a sigma over n, not a repeat of the terms',
+      /∑/.test(sum) && /n/.test(sum) && !/5040/.test(sum), sum);
+
+    // The table takes the user's own argument, so this is not just a name match.
+    await app.enter('sin(2*x)');
+    const composed = await s.eval(
+      `document.querySelector('.card')?.querySelector('.card__closed')
+         ?.innerText.replace(/\\s+/g, ' ') || ''`);
+    check('a composed argument gets a sum too', /∑/.test(composed), composed);
+
     await app.setField('terms', '5');
     await app.enter('sin(x)');
     card = await app.lastCard();
@@ -1009,7 +1025,17 @@ const GROUPS = {
     card = await app.lastCard();
     check('expansion about a point works', card && !card.failed, card?.text);
 
+    // A function with no closed form must still expand, just without the sigma.
     await app.setField('about', '0');
+    await app.setField('terms', '3');
+    await app.enter('exp(sin(x))');
+    card = await app.lastCard();
+    const none = await s.eval(
+      `!!document.querySelector('.card')?.querySelector('.card__closed')`);
+    check('an expansion with no closed form still works',
+      card && !card.failed && /x/.test(card.text), card?.text);
+    check('and simply omits the sum', none === false, String(none));
+
     await app.setField('terms', 'x');
     await app.enter('sin(x)');
     card = await app.lastCard();
