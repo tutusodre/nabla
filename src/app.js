@@ -697,6 +697,27 @@
     else input.inputMode = input.dataset.kind === 'int' ? 'numeric' : 'text';
   }
 
+  /* The pages have different row counts, so the dock used to resize under the
+   * thumb on every tab change. Measure them once the keypad is actually on
+   * screen — hidden grids have no height to read — and pin the tallest.
+   * Re-run once the maths webfont lands: key labels are set in it, and the
+   * fallback metrics measure short. */
+  function syncKeypadHeight() {
+    if (el.keypad.hidden) return;
+    const grids = [...el.keypadPages.querySelectorAll('.kgrid')];
+    if (!grids.length) return;
+
+    el.keypadPages.style.removeProperty('--kgrid-h');
+    let tallest = 0;
+    for (const grid of grids) {
+      const was = grid.hidden;
+      grid.hidden = false;
+      tallest = Math.max(tallest, grid.offsetHeight);
+      grid.hidden = was;
+    }
+    if (tallest) el.keypadPages.style.setProperty('--kgrid-h', `${tallest}px`);
+  }
+
   function applyKeyboard() {
     const wanted = keypadWanted();
     const math = wanted && state.keyboard === 'math';
@@ -707,6 +728,7 @@
     // the native-keyboard switch hides the keypad on a phone too, not just on
     // desktop, so this keys off the keypad rather than the viewport width.
     el.composer.dataset.nav = math ? 'keypad' : 'chips';
+    syncKeypadHeight();
     el.kswitch.hidden = !(wanted && state.keyboard === 'native');
     syncDockHeight();
   }
@@ -1265,6 +1287,13 @@
     // away from it. state.entries stays chronological for export.
     el.stream.prepend(card);
     mountCard(entry, card);
+    /* Results land at the top of the stream, so computing while scrolled down
+     * into history used to put the answer off-screen — you pressed go and saw
+     * nothing happen. */
+    el.stream.scrollTo({
+      top: 0,
+      behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    });
     save();
     scrollToNewest();
   }
@@ -1668,7 +1697,18 @@
       window.visualViewport.addEventListener('scroll', syncViewport);
     }
     window.addEventListener('resize', syncViewport);
-    window.addEventListener('orientationchange', () => setTimeout(syncViewport, 250));
+    window.addEventListener('orientationchange', () => setTimeout(() => {
+      syncKeypadHeight();
+      syncViewport();
+    }, 250));
+
+    // KaTeX's Computer Modern arrives after first paint and changes key heights.
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => {
+        syncKeypadHeight();
+        syncDockHeight();
+      }).catch(() => { /* font loading is a nicety, not a requirement */ });
+    }
 
     if (location.protocol === 'file:') {
       bootFailed(t('boot.fileProtocol'));

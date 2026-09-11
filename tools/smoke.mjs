@@ -1249,6 +1249,53 @@ const GROUPS = {
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },
 
+  smoothness: async (s, app) => {
+    await s.open(APP);
+    await app.boot();
+
+    // Every keypad page should stand the same height as the tallest.
+    const heights = await s.eval(`(() => {
+      const out = {};
+      for (const tab of document.querySelectorAll('#keypadTabs button')) {
+        tab.click();
+        out[tab.dataset.page] = document.getElementById('keypadPages').offsetHeight;
+      }
+      return out;
+    })()`);
+    const seen = Object.values(heights);
+    check('the keypad is the same height on every page',
+      seen.length > 2 && Math.max(...seen) - Math.min(...seen) === 0, JSON.stringify(heights));
+
+    // A result computed while scrolled into history must come into view.
+    await app.enter('x^2');
+    await app.enter('x^3');
+    await app.enter('x^4');
+    await s.eval('document.getElementById("stream").scrollTop = 9999');
+    const before = await s.eval('document.getElementById("stream").scrollTop');
+    check('the stream really was scrolled away', before > 0, String(before));
+    await app.enter('x^5');
+    await s.poll('document.getElementById("stream").scrollTop === 0', 'scroll back to the result', 8000);
+    check('a new result scrolls itself into view', true);
+
+    // Pinch-zoom must not be blocked.
+    const viewport = await s.eval(
+      `document.querySelector('meta[name=viewport]').getAttribute('content')`);
+    check('the viewport does not block pinch-zoom',
+      !/maximum-scale|user-scalable\s*=\s*no/.test(viewport), viewport);
+
+    // Every text input clears iOS's 16px focus-zoom threshold.
+    const small = await s.eval(`(() => {
+      document.getElementById('input').focus();
+      return [...document.querySelectorAll('.entry__input, .field__input')]
+        .map((el) => [el.id || 'input', parseFloat(getComputedStyle(el).fontSize)])
+        .filter(([, size]) => size < 16);
+    })()`);
+    check('no input is small enough to trigger iOS focus-zoom',
+      Array.isArray(small) && small.length === 0, JSON.stringify(small));
+
+    check('no console errors', s.errors.length === 0, s.errors.join(' | '));
+  },
+
   constants: async (s, app) => {
     await s.open(APP);
     await app.boot();

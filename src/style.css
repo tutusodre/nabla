@@ -693,7 +693,7 @@ code {
   padding: 6px 8px;
   min-height: 32px;
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 16px;            /* 16px keeps iOS from zooming on focus */
   color: var(--ink);
   width: 5.2em;
   min-width: 0;
@@ -851,6 +851,11 @@ code {
   gap: 6px;
 }
 .kgrid[hidden] { display: none; }
+
+/* Height is measured once and pinned by syncKeypadHeight(): the pages have
+ * different row counts, and without this the dock jumps every time you change
+ * tab — which also left --dock-h stale enough to drop a toast inside it. */
+.kgrid { min-height: var(--kgrid-h, auto); }
 
 .key {
   appearance: none;

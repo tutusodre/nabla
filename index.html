@@ -3,7 +3,10 @@
 
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <!-- No maximum-scale: the output is small typeset maths, so pinch-zoom has to
+       work. The iOS focus-zoom that maximum-scale used to suppress is handled
+       by the 16px rule on every input instead. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Nabla</title>
   <meta name="description" content="Symbolic math and plots, typeset properly. Runs entirely in your browser.">
 
