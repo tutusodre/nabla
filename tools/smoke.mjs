@@ -1198,6 +1198,104 @@ const GROUPS = {
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },
 
+  waking: async (s, app) => {
+    /* A first run keeps the overlay — it is fetching ~25 MB and owes the user
+     * an explanation. Every later launch must not wait behind it. */
+    await clearStorage(s);
+    await s.open(APP);
+    await s.poll('!!document.getElementById("boot")', 'shell');
+    check('a first run keeps the boot overlay',
+      await s.eval('document.getElementById("boot").hidden === false'));
+    await app.boot();
+    check('the engine reaches ready on a first run', true);
+
+    // Second launch: the shell must be live before the engine is.
+    await s.open(APP);
+    // The elements exist as soon as the HTML parses; what matters is that
+    // init() has run, which is when the warm-start branch decides.
+    await s.poll('typeof window.__nablaReady !== "undefined"', 'init');
+    const early = await s.eval(`(() => ({
+      overlay: document.getElementById('boot').hidden,
+      strip: !document.getElementById('waking').hidden,
+      ready: !!window.__nablaReady,
+    }))()`);
+    check('a return visit is not behind the overlay', early.overlay === true, JSON.stringify(early));
+    check('a progress strip stands in for it', early.strip === true, JSON.stringify(early));
+    check('and the engine is not ready yet', early.ready === false, JSON.stringify(early));
+
+    // The stream is readable while the engine is still waking.
+    check('history is reachable before the engine is up',
+      await s.eval('getComputedStyle(document.getElementById("stream")).visibility !== "hidden"'));
+
+    // A press made now must be kept, not dropped.
+    const queued = await s.eval(`(() => {
+      const input = document.getElementById('input');
+      input.value = 'x^2';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      document.getElementById('form').dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }));
+      return { cards: document.querySelectorAll('.card').length, ready: !!window.__nablaReady };
+    })()`);
+    check('the press is taken before the engine is ready', queued.ready === false, JSON.stringify(queued));
+
+    await app.boot();
+    await s.poll('document.querySelectorAll(".card").length > 0', 'the queued result', 30000);
+    const card = await app.lastCard();
+    check('the queued press runs once the engine is up',
+      card && !card.failed && /2x/.test(card.text), card && card.text);
+    check('the strip is gone once ready',
+      await s.eval('document.getElementById("waking").hidden === true'));
+
+    check('no console errors', s.errors.length === 0, s.errors.join(' | '));
+  },
+
+  smoothness: async (s, app) => {
+    await s.open(APP);
+    await app.boot();
+
+    // Every keypad page should stand the same height as the tallest.
+    const heights = await s.eval(`(() => {
+      const out = {};
+      for (const tab of document.querySelectorAll('#keypadTabs button')) {
+        tab.click();
+        out[tab.dataset.page] = document.getElementById('keypadPages').offsetHeight;
+      }
+      return out;
+    })()`);
+    const seen = Object.values(heights);
+    check('the keypad is the same height on every page',
+      seen.length > 2 && Math.max(...seen) - Math.min(...seen) === 0, JSON.stringify(heights));
+
+    // A result computed while scrolled into history must come into view.
+    await app.enter('x^2');
+    await app.enter('x^3');
+    await app.enter('x^4');
+    await s.eval('document.getElementById("stream").scrollTop = 9999');
+    const before = await s.eval('document.getElementById("stream").scrollTop');
+    check('the stream really was scrolled away', before > 0, String(before));
+    await app.enter('x^5');
+    await s.poll('document.getElementById("stream").scrollTop === 0', 'scroll back to the result', 8000);
+    check('a new result scrolls itself into view', true);
+
+    // Pinch-zoom must not be blocked.
+    const viewport = await s.eval(
+      `document.querySelector('meta[name=viewport]').getAttribute('content')`);
+    check('the viewport does not block pinch-zoom',
+      !/maximum-scale|user-scalable\s*=\s*no/.test(viewport), viewport);
+
+    // Every text input clears iOS's 16px focus-zoom threshold.
+    const small = await s.eval(`(() => {
+      document.getElementById('input').focus();
+      return [...document.querySelectorAll('.entry__input, .field__input')]
+        .map((el) => [el.id || 'input', parseFloat(getComputedStyle(el).fontSize)])
+        .filter(([, size]) => size < 16);
+    })()`);
+    check('no input is small enough to trigger iOS focus-zoom',
+      Array.isArray(small) && small.length === 0, JSON.stringify(small));
+
+    check('no console errors', s.errors.length === 0, s.errors.join(' | '));
+  },
+
   constants: async (s, app) => {
     await s.open(APP);
     await app.boot();

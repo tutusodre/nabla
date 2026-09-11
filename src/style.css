@@ -181,6 +181,25 @@ code {
 
 .boot--failed .boot__mark { animation: none; color: var(--error); }
 
+/* The warm-start counterpart to the boot overlay: a hairline of progress under
+ * the topbar instead of a wall across the app. Amber rather than the boot
+ * bar's accent: this one is background progress, not the thing you're waiting
+ * on. */
+.waking {
+  position: relative;
+  height: 2px;
+  background: var(--rule);
+  overflow: hidden;
+}
+.waking i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--amber);
+  transition: width 0.3s ease;
+}
+.waking[hidden] { display: none; }
+
 /* -------------------------------------------------------------- topbar --- */
 
 .topbar {
@@ -674,7 +693,7 @@ code {
   padding: 6px 8px;
   min-height: 32px;
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 16px;            /* 16px keeps iOS from zooming on focus */
   color: var(--ink);
   width: 5.2em;
   min-width: 0;
@@ -832,6 +851,11 @@ code {
   gap: 6px;
 }
 .kgrid[hidden] { display: none; }
+
+/* Height is measured once and pinned by syncKeypadHeight(): the pages have
+ * different row counts, and without this the dock jumps every time you change
+ * tab — which also left --dock-h stale enough to drop a toast inside it. */
+.kgrid { min-height: var(--kgrid-h, auto); }
 
 .key {
   appearance: none;

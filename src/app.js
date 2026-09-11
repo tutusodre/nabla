@@ -8,6 +8,10 @@
   'use strict';
 
   const HISTORY_KEY = 'nabla.history.v1';
+  /* Set once the engine has reached ready on this device. Its absence is what
+   * distinguishes a genuine first run — which downloads ~25 MB and deserves an
+   * explanation — from every later launch, which should not wait at all. */
+  const BOOTED_KEY = 'nabla.booted.v1';
   const THEME_KEY = 'nabla.theme.v1';
   const MAX_ENTRIES = 60;
   const MAX_STORED_POINTS = 220;
@@ -216,6 +220,8 @@
     entries: [],
     ready: false,
     busy: false,
+    // A press made before the engine was ready, held until it is.
+    queued: null,
     varTouched: {},
     /* Which field the keypad types into: a parameter field's name, or null
      * for the expression. A name rather than the node itself because
@@ -240,6 +246,7 @@
     form: $('form'), input: $('input'), go: $('go'), toast: $('toast'),
     themeBtn: $('themeBtn'), exportBtn: $('exportBtn'), clearBtn: $('clearBtn'),
     themeColor: $('themeColor'),
+    waking: $('waking'), wakingBar: $('wakingBar'),
     keypad: $('keypad'), keypadTabs: $('keypadTabs'), keypadPages: $('keypadPages'),
     kpBack: $('kpBack'), kpToggle: $('kpToggle'),
     kswitch: $('kswitch'), kswitchBtn: $('kswitchBtn'),
@@ -262,14 +269,26 @@
 
   function handleWorkerMessage(msg) {
     if (msg.type === 'status') {
+      const percent = `${Math.round((msg.progress || 0) * 100)}%`;
       el.bootStatus.textContent = t(msg.key);
-      el.bootBar.style.width = `${Math.round((msg.progress || 0) * 100)}%`;
+      el.bootBar.style.width = percent;
+      el.wakingBar.style.width = percent;
       return;
     }
     if (msg.type === 'ready') {
       state.ready = true;
+      window.__nablaReady = true;        // read by tools/smoke.mjs
       hideBoot();
+      el.waking.hidden = true;
+      try { localStorage.setItem(BOOTED_KEY, '1'); } catch (err) { /* private mode */ }
       updateGo();
+      // A press made while the engine was still waking was kept, not dropped.
+      if (state.queued) {
+        const queued = state.queued;
+        state.queued = null;
+        run(queued.source, queued.op, queued.params);
+        return;
+      }
       if (el.input.value.trim()) schedulePreview();
       return;
     }
@@ -311,6 +330,7 @@
     pending.clear();
     if (worker) worker.terminate();
     state.ready = false;
+    window.__nablaReady = false;
     // Terminating drops the whole Python runtime, so this is a full reboot —
     // several seconds. Without the overlay back the app just sits there with a
     // dead submit button and no sign that anything is happening.
@@ -677,6 +697,27 @@
     else input.inputMode = input.dataset.kind === 'int' ? 'numeric' : 'text';
   }
 
+  /* The pages have different row counts, so the dock used to resize under the
+   * thumb on every tab change. Measure them once the keypad is actually on
+   * screen — hidden grids have no height to read — and pin the tallest.
+   * Re-run once the maths webfont lands: key labels are set in it, and the
+   * fallback metrics measure short. */
+  function syncKeypadHeight() {
+    if (el.keypad.hidden) return;
+    const grids = [...el.keypadPages.querySelectorAll('.kgrid')];
+    if (!grids.length) return;
+
+    el.keypadPages.style.removeProperty('--kgrid-h');
+    let tallest = 0;
+    for (const grid of grids) {
+      const was = grid.hidden;
+      grid.hidden = false;
+      tallest = Math.max(tallest, grid.offsetHeight);
+      grid.hidden = was;
+    }
+    if (tallest) el.keypadPages.style.setProperty('--kgrid-h', `${tallest}px`);
+  }
+
   function applyKeyboard() {
     const wanted = keypadWanted();
     const math = wanted && state.keyboard === 'math';
@@ -687,6 +728,7 @@
     // the native-keyboard switch hides the keypad on a phone too, not just on
     // desktop, so this keys off the keypad rather than the viewport width.
     el.composer.dataset.nav = math ? 'keypad' : 'chips';
+    syncKeypadHeight();
     el.kswitch.hidden = !(wanted && state.keyboard === 'native');
     syncDockHeight();
   }
@@ -796,8 +838,9 @@
   }
 
   function updateGo() {
-    if (state.busy) return;
-    el.go.disabled = !state.ready || !el.input.value.trim();
+    if (state.busy || state.queued) return;
+    // Not gated on state.ready: a press before the engine is up is queued.
+    el.go.disabled = !el.input.value.trim();
   }
 
   async function submit() {
@@ -808,10 +851,25 @@
       return;
     }
     const source = el.input.value.trim();
-    if (!source || !state.ready || state.busy) return;
+    if (!source || state.busy) return;
 
     const op = state.op;
     const params = { ...state.params[op] };
+
+    /* Pressing go before the engine is up used to do nothing at all. Hold the
+     * press instead and run it on ready — the wait is the same, but the work
+     * you already did survives it. */
+    if (!state.ready) {
+      state.queued = { source, op, params };
+      el.go.disabled = true;
+      el.go.innerHTML = '&middot;&middot;&middot;';
+      el.go.setAttribute('aria-label', t('entry.queued'));
+      return;
+    }
+    run(source, op, params);
+  }
+
+  async function run(source, op, params) {
     setBusy(true);
     const result = await call(op, { source, ...coerce(op, params) });
     setBusy(false);
@@ -1229,6 +1287,13 @@
     // away from it. state.entries stays chronological for export.
     el.stream.prepend(card);
     mountCard(entry, card);
+    /* Results land at the top of the stream, so computing while scrolled down
+     * into history used to put the answer off-screen — you pressed go and saw
+     * nothing happen. */
+    el.stream.scrollTo({
+      top: 0,
+      behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    });
     save();
     scrollToNewest();
   }
@@ -1496,6 +1561,17 @@
 
   function setLanguage(lang) {
     window.NablaI18n.set(lang);
+    /* History, export, copy, theme and language need no Python, and load()
+     * has already restored the stream. Only a genuine first run — which is
+     * fetching ~25 MB — keeps the overlay; every later launch goes straight
+     * to the app with a progress strip instead of a wall. */
+    let warm = false;
+    try { warm = localStorage.getItem(BOOTED_KEY) === '1'; } catch (err) { /* private mode */ }
+    if (warm) {
+      hideBoot();
+      el.waking.hidden = false;
+    }
+
     applyStaticStrings();
     renderChips();
     renderParams();
@@ -1561,10 +1637,22 @@
       if (localStorage.getItem(KEYBOARD_KEY) === 'native') state.keyboard = 'native';
     } catch (err) { /* private mode */ }
 
+    /* History, export, copy, theme and language need no Python, and load()
+     * has already restored the stream. Only a genuine first run — which is
+     * fetching ~25 MB — keeps the overlay; every later launch goes straight
+     * to the app with a progress strip instead of a wall. */
+    let warm = false;
+    try { warm = localStorage.getItem(BOOTED_KEY) === '1'; } catch (err) { /* private mode */ }
+    if (warm) {
+      hideBoot();
+      el.waking.hidden = false;
+    }
+
     applyStaticStrings();
     renderChips();
     renderParams();
     window.__nablaOp = state.op;
+    window.__nablaReady = state.ready;
     renderKeypad();
     applyKeyboard();
     setKeypadOpen(true);
@@ -1609,7 +1697,18 @@
       window.visualViewport.addEventListener('scroll', syncViewport);
     }
     window.addEventListener('resize', syncViewport);
-    window.addEventListener('orientationchange', () => setTimeout(syncViewport, 250));
+    window.addEventListener('orientationchange', () => setTimeout(() => {
+      syncKeypadHeight();
+      syncViewport();
+    }, 250));
+
+    // KaTeX's Computer Modern arrives after first paint and changes key heights.
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => {
+        syncKeypadHeight();
+        syncDockHeight();
+      }).catch(() => { /* font loading is a nicety, not a requirement */ });
+    }
 
     if (location.protocol === 'file:') {
       bootFailed(t('boot.fileProtocol'));
