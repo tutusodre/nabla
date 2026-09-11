@@ -13,6 +13,7 @@
   const MAX_STORED_POINTS = 220;
   const PREVIEW_DELAY = 180;
   const ABORT_AFTER = 2500;
+  const SW_WAIT = 3000;
 
   // ---------------------------------------------------------- operations --
 
@@ -62,12 +63,32 @@
       meta: (p) => t('meta.limit', p.variable, p.point) +
         (p.direction === '+-' ? '' : t(p.direction === '+' ? 'meta.fromRight' : 'meta.fromLeft')),
     },
+    series: {
+      labelKey: 'op.series',
+      chipKey: 'chip.series',
+      placeholder: 'sin(x)',
+      fields: [
+        { name: 'variable', labelKey: 'field.wrt', kind: 'var', value: 'x' },
+        { name: 'about', labelKey: 'field.about', kind: 'text', value: '0' },
+        { name: 'order', labelKey: 'field.terms', kind: 'int', value: '6' },
+      ],
+      meta: (params) => `${params.variable} → ${params.about}`,
+    },
     simplify: {
       labelKey: 'op.simplify',
       chipKey: 'chip.simplify',
       placeholder: 'sin(x)^2 + cos(x)^2',
       fields: [],
       meta: () => t('meta.simplify'),
+    },
+    substitute: {
+      labelKey: 'op.substitute',
+      chip: 'x = a',
+      placeholder: 'x^3 + 1',
+      fields: [
+        { name: 'at', labelKey: 'field.at', kind: 'text', value: '', placeholder: 'x = 2, y = 3' },
+      ],
+      meta: (params) => params.at || '',
     },
     solve: {
       labelKey: 'op.solve',
@@ -103,11 +124,38 @@
     },
   };
 
-  const OP_ORDER = ['derivative', 'integral', 'limit', 'simplify', 'solve', 'plot', 'table'];
+  const OP_ORDER = ['derivative', 'integral', 'limit', 'series', 'simplify', 'substitute', 'solve', 'plot', 'table'];
+
+  /* Ops whose result is a single expression, so it can be reused as `ans`.
+   * solve is out because "the answer" is ambiguous with several roots;
+   * plot and table are out because they aren't scalars. A series belongs
+   * here despite the O(...) term: the printed form re-parses, so d/dx of a
+   * stored expansion differentiates the O term along with everything else. */
+  const ANS_OPS = new Set([
+    'derivative', 'integral', 'limit', 'series', 'simplify', 'substitute',
+  ]);
 
   /* Keypad pages. A key is [label, spec]: a plain string inserts literally,
    * {fn} inserts `name()` with the caret inside, {act} runs an action. */
   const KEYPAD = [
+    {
+      id: 'op',
+      tab: 'keypad.ops',
+      tabI18n: true,
+      cols: 4,
+      keys: [
+        ['d/dx', { act: 'op', op: 'derivative' }],
+        ['∫', { act: 'op', op: 'integral' }],
+        ['lim', { act: 'op', op: 'limit' }],
+        ['series', { act: 'op', op: 'series' }],
+        ['simplify', { act: 'op', op: 'simplify' }],
+        ['solve', { act: 'op', op: 'solve' }],
+        ['x = a', { act: 'op', op: 'substitute' }],
+        [null, null],
+        ['plot', { act: 'op', op: 'plot' }],
+        ['table', { act: 'op', op: 'table' }],
+      ],
+    },
     {
       id: 'num',
       tab: '123',
@@ -118,7 +166,7 @@
         ['1', '1'], ['2', '2'], ['3', '3'], ['×', '*'], ['−', '-'],
         ['0', '0'], ['.', '.'], ['x', 'x'], [',', ','], ['+', '+'],
         ['◀', { act: 'left', repeat: true }], ['▶', { act: 'right', repeat: true }],
-        ['π', 'pi'], ['=', '='], ['⏎', { act: 'enter', wide: true }],
+        ['ans', 'ans'], ['=', '='], ['⏎', { act: 'enter', wide: true }],
       ],
     },
     {
@@ -134,9 +182,14 @@
         ['x²', '^2'], ['x⁻¹', '^-1'],
       ],
     },
+    /* Keeps the id 'var' although the tab now reads "names": the id is what
+     * KEYPAD_PAGE_KEY has stored in every install, and renaming it would
+     * orphan that saved page. Six rows, one more than the numeric page — the
+     * eleven constants and π earn it, and pages already differ in height. */
     {
       id: 'var',
-      tab: 'abc',
+      tab: 'keypad.names',
+      tabI18n: true,
       cols: 6,
       keys: [
         ['x', 'x'], ['y', 'y'], ['z', 'z'], ['t', 't'], ['n', 'n'], ['k', 'k'],
@@ -144,6 +197,9 @@
         ['α', 'alpha'], ['β', 'beta'],
         ['λ', 'lamda'], ['μ', 'mu'], ['σ', 'sigma'], ['ε', 'epsilon'],
         ['ρ', 'rho'], ['δ', 'delta'],
+        ['π', 'pi'], ['c', 'c'], ['h', 'h'], ['ℏ', 'hbar'], ['G', 'G'], ['g', 'g'],
+        ['k_B', 'k_B'], ['N_A', 'N_A'], ['q_e', 'q_e'], ['m_e', 'm_e'],
+        ['μ₀', 'mu_0'], ['ε₀', 'epsilon_0'],
         ['keypad.native', { act: 'native', full: true, i18n: true }],
       ],
     },
@@ -161,6 +217,11 @@
     ready: false,
     busy: false,
     varTouched: {},
+    /* Which field the keypad types into: a parameter field's name, or null
+     * for the expression. A name rather than the node itself because
+     * renderParams() replaces those inputs wholesale, and a held reference
+     * would go on typing into one that has left the page. */
+    target: null,
     keypadPage: 'num',
     keypadOpen: true,
     keyboard: 'math',
@@ -175,7 +236,7 @@
   const el = {
     boot: $('boot'), bootStatus: $('bootStatus'), bootBar: $('bootBar'),
     stream: $('stream'), intro: $('intro'), preview: $('preview'),
-    chips: $('chips'), params: $('params'),
+    chips: $('chips'), params: $('params'), composer: $('composer'),
     form: $('form'), input: $('input'), go: $('go'), toast: $('toast'),
     themeBtn: $('themeBtn'), exportBtn: $('exportBtn'), clearBtn: $('clearBtn'),
     themeColor: $('themeColor'),
@@ -227,11 +288,19 @@
     }
   }
 
+  /* state.entries is chronological (oldest first, see addEntry) — findLast
+   * walks from the end so this is the most recent qualifying entry, without
+   * mutating or copying the array. */
+  function lastAnswer() {
+    const entry = state.entries.findLast((item) => item.ok && ANS_OPS.has(item.op));
+    return entry && entry.data ? entry.data.text : null;
+  }
+
   function call(op, args) {
     return new Promise((resolve) => {
       const id = ++sequence;
       pending.set(id, resolve);
-      worker.postMessage({ id, op, args, lang: window.NablaI18n.lang });
+      worker.postMessage({ id, op, args: { ...args, ans: lastAnswer() }, lang: window.NablaI18n.lang });
     });
   }
 
@@ -242,9 +311,18 @@
     pending.clear();
     if (worker) worker.terminate();
     state.ready = false;
-    el.bootStatus.textContent = t('boot.restarting');
-    el.bootBar.style.width = '10%';
+    // Terminating drops the whole Python runtime, so this is a full reboot —
+    // several seconds. Without the overlay back the app just sits there with a
+    // dead submit button and no sign that anything is happening.
+    showBoot(t('boot.restarting'), 0.1);
     startWorker();
+  }
+
+  function showBoot(message, progress) {
+    el.boot.classList.remove('boot--failed');
+    el.boot.hidden = false;
+    el.bootStatus.textContent = message;
+    el.bootBar.style.width = `${Math.round((progress || 0) * 100)}%`;
   }
 
   function hideBoot() {
@@ -296,8 +374,23 @@
 
   function renderParams() {
     el.params.innerHTML = '';
+    // The fields being rebuilt are the fields losing focus, so the keypad
+    // goes back to the expression along with it.
+    state.target = null;
     const spec = OPS[state.op];
     const values = state.params[state.op];
+
+    /* Shows the current op and is also the way to change it, so finding the
+     * operations never depends on noticing a keypad tab. */
+    const opButton = node('button', 'oplabel', t(spec.labelKey));
+    opButton.type = 'button';
+    opButton.setAttribute('aria-label', t('nav.change'));
+    opButton.addEventListener('pointerdown', (event) => event.preventDefault());
+    opButton.addEventListener('click', () => {
+      setKeypadPage('op');
+      setKeypadOpen(true);
+    });
+    el.params.appendChild(opButton);
 
     for (const field of spec.fields) {
       const wrap = node('div', 'field');
@@ -335,11 +428,15 @@
           (field.kind === 'var' ? ' field__input--var' : '');
         input.value = values[field.name];
         input.id = `f-${field.name}`;
+        // What the keypad routes by, and what tells it whether this field
+        // holds an expression or a name.
+        input.dataset.field = field.name;
+        input.dataset.kind = field.kind;
         input.autocomplete = 'off';
         input.spellcheck = false;
         input.setAttribute('autocapitalize', 'off');
         if (field.placeholder) input.placeholder = field.placeholder;
-        if (field.kind === 'int') input.inputMode = 'numeric';
+        applyFieldKeyboard(input);
         label.setAttribute('for', input.id);
         input.addEventListener('input', () => {
           values[field.name] = input.value;
@@ -363,7 +460,8 @@
     el.keypadPages.innerHTML = '';
 
     for (const page of KEYPAD) {
-      const tab = node('button', 'ktab', page.tab);
+      const tab = node('button', 'ktab', page.tabI18n ? t(page.tab) : page.tab);
+      tab.dataset.page = page.id;
       tab.type = 'button';
       tab.setAttribute('role', 'tab');
       tab.setAttribute('aria-selected', String(page.id === state.keypadPage));
@@ -377,6 +475,10 @@
       grid.hidden = page.id !== state.keypadPage;
 
       for (const [label, spec] of page.keys) {
+        if (spec === null) {
+          grid.appendChild(node('div', 'kgap'));
+          continue;
+        }
         const config = typeof spec === 'string' ? { text: spec } : spec;
         const key = node('button', 'key', config.i18n ? t(label) : label);
         key.type = 'button';
@@ -384,7 +486,7 @@
         if (config.full) key.classList.add('key--full');
         if (config.wide) key.classList.add('key--wide');
         if (config.act === 'enter') key.classList.add('key--go');
-        if (config.fn || config.act === 'native') key.classList.add('key--word');
+        if (config.fn || config.act === 'native' || config.act === 'op') key.classList.add('key--word');
 
         bindKey(key, () => pressKey(config), config.repeat);
         grid.appendChild(key);
@@ -419,15 +521,60 @@
     }
   }
 
+  /* The composer has more than one field and the keypad is the only keyboard
+   * there is on a phone, so every key resolves its target at press time.
+   * A name that no longer matches a field — the op changed under it — falls
+   * back to the expression rather than typing into nothing. */
+  function targetInput() {
+    if (!state.target) return el.input;
+    return el.params.querySelector(`.field__input[data-field="${state.target}"]`) || el.input;
+  }
+
+  /* The keypad follows the caret rather than leading it: whichever field the
+   * user is in is the one it types into, and tapping any of them brings it
+   * back up. focusin, not focus, because it bubbles — one listener then
+   * survives every renderParams() rebuild underneath it. */
+  function retarget(event) {
+    const field = event.target.closest('.entry__input, .field__input');
+    if (!field) {
+      // A checkbox or a button carries no caret, so focus landing on one puts
+      // the keypad back on the expression. A click that hit neither is not a
+      // focus change at all and leaves the target where it was.
+      if (event.type === 'focusin') state.target = null;
+      return;
+    }
+    state.target = field.dataset.field || null;
+    setKeypadOpen(true);
+  }
+
+  /* Every field already listens for its own `input` event — the expression
+   * schedules a preview, a parameter field writes state.params and marks the
+   * variable touched — so the keypad announces the edit instead of keeping a
+   * second copy of that bookkeeping. */
+  function commit(input) {
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  /* Whether what is being typed is read as maths. The implicit `*` below and
+   * nothing else depends on it: a `var` field holds a name and an `int` field
+   * a count, neither of which is an expression. */
+  function holdsExpression(input) {
+    return input === el.input || input.dataset.kind === 'text';
+  }
+
   /* Letter followed by letter is the ambiguous case: `omega` then `t` gives
    * `omegat`, which split_symbols shreds into six single letters, and `x`
    * then `pi` gives `xpi` rather than x·π. An implicit `*` makes the tap
    * sequence mean what it looks like. A digit before is fine — `2pi` and
-   * `2x` already parse as products and read better without the star. */
+   * `2x` already parse as products and read better without the star. None of
+   * it applies outside an expression: `x` then `y` in a variable field is the
+   * two-letter name, not a product. */
   function insertName(name) {
-    const caret = el.input.selectionStart ?? el.input.value.length;
-    const before = el.input.value[caret - 1] || '';
-    insertAtCursor((/[A-Za-z]/.test(before) ? '*' : '') + name);
+    const input = targetInput();
+    const caret = input.selectionStart ?? input.value.length;
+    const before = input.value[caret - 1] || '';
+    const star = holdsExpression(input) && /[A-Za-z]/.test(before);
+    insertAtCursor((star ? '*' : '') + name);
   }
 
   function pressKey(config) {
@@ -446,8 +593,9 @@
         break;
       case 'close': {
         // Step over the auto-inserted bracket rather than doubling it.
-        const caret = el.input.selectionStart ?? 0;
-        if (el.input.value[caret] === ')') moveCaret(1);
+        const input = targetInput();
+        const caret = input.selectionStart ?? 0;
+        if (input.value[caret] === ')') moveCaret(1);
         else insertAtCursor(')');
         break;
       }
@@ -455,26 +603,29 @@
       case 'right': moveCaret(1); break;
       case 'enter': submit(); break;
       case 'native': setKeyboard('native'); break;
+      case 'op':
+        setOp(config.op);
+        break;
       default: break;
     }
   }
 
   function moveCaret(delta) {
-    const input = el.input;
+    const input = targetInput();
     const caret = Math.max(0, Math.min(input.value.length, (input.selectionStart ?? 0) + delta));
     input.focus();
     input.setSelectionRange(caret, caret);
   }
 
   function backspace() {
-    const input = el.input;
+    const input = targetInput();
     const start = input.selectionStart ?? input.value.length;
     const end = input.selectionEnd ?? start;
     if (start !== end) input.setRangeText('', start, end, 'end');
     else if (start > 0) input.setRangeText('', start - 1, start, 'end');
     else return;
     input.focus();
-    schedulePreview();
+    commit(input);
   }
 
   function setKeypadPage(id) {
@@ -486,6 +637,9 @@
     el.keypadPages.querySelectorAll('.kgrid').forEach((grid) => {
       grid.hidden = grid.dataset.page !== id;
     });
+    // Pages differ in row count, so the dock the toast has to clear just
+    // changed height — 212px on the ops page against 368px on the names one.
+    syncDockHeight();
   }
 
   function setKeypadOpen(open) {
@@ -513,11 +667,26 @@
     el.input.focus();
   }
 
+  /* Same trade as the expression field: while our keypad is up, the phone's
+   * own keyboard must not come up over it. renderParams() builds these inputs
+   * fresh whenever the op or the language changes, so each one asks for the
+   * current mode as it is made rather than waiting for the next
+   * applyKeyboard(). */
+  function applyFieldKeyboard(input) {
+    if (keypadWanted() && state.keyboard === 'math') input.inputMode = 'none';
+    else input.inputMode = input.dataset.kind === 'int' ? 'numeric' : 'text';
+  }
+
   function applyKeyboard() {
     const wanted = keypadWanted();
     const math = wanted && state.keyboard === 'math';
     el.input.setAttribute('inputmode', math ? 'none' : 'text');
+    el.params.querySelectorAll('.field__input').forEach((field) => applyFieldKeyboard(field));
     el.keypad.hidden = !math;
+    // Ops live on the keypad when it's showing and on the chips when it isn't;
+    // the native-keyboard switch hides the keypad on a phone too, not just on
+    // desktop, so this keys off the keypad rather than the viewport width.
+    el.composer.dataset.nav = math ? 'keypad' : 'chips';
     el.kswitch.hidden = !(wanted && state.keyboard === 'native');
     syncDockHeight();
   }
@@ -528,19 +697,20 @@
     renderChips();
     renderParams();
     schedulePreview();
+    window.__nablaOp = name;          // read by tools/smoke.mjs
   }
 
   /* caretOffset lands the cursor inside what was inserted — `sin()` wants it
    * between the brackets, not after them. Defaults to the end. */
   function insertAtCursor(text, caretOffset) {
-    const input = el.input;
+    const input = targetInput();
     const start = input.selectionStart ?? input.value.length;
     const end = input.selectionEnd ?? input.value.length;
     input.value = input.value.slice(0, start) + text + input.value.slice(end);
     const caret = start + (caretOffset == null ? text.length : caretOffset);
     input.focus();
     input.setSelectionRange(caret, caret);
-    schedulePreview();
+    commit(input);
   }
 
   // ------------------------------------------------------------- preview --
@@ -1394,6 +1564,7 @@
     applyStaticStrings();
     renderChips();
     renderParams();
+    window.__nablaOp = state.op;
     renderKeypad();
     applyKeyboard();
     setKeypadOpen(true);
@@ -1405,10 +1576,11 @@
       submit();
     });
     el.input.addEventListener('input', schedulePreview);
-    // Both: the keys preventDefault so focus never leaves the field, which
-    // means re-tapping it fires no focus event — only a click.
-    el.input.addEventListener('focus', () => setKeypadOpen(true));
-    el.input.addEventListener('click', () => setKeypadOpen(true));
+    // Both, and on the composer rather than on any one field: the keys
+    // preventDefault so focus never leaves the field being edited, which means
+    // re-tapping it fires no focus event — only a click.
+    el.composer.addEventListener('focusin', retarget);
+    el.composer.addEventListener('click', retarget);
 
     bindKey(el.kpBack, backspace, true);
     el.kpToggle.addEventListener('pointerdown', (event) => event.preventDefault());
@@ -1445,14 +1617,35 @@
     }
 
     updateGo();
-    startWorker();
 
     const secure = location.protocol === 'https:' ||
       ['localhost', '127.0.0.1'].includes(location.hostname);
     if (secure && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./service-worker.js', { updateViaCache: 'none' })
-        .catch(() => { /* caching is a bonus, not a requirement */ });
+      bootBehindServiceWorker();
+    } else {
+      startWorker();
     }
+  }
+
+  /* The compute worker pulls ~25 MB of Pyodide and SymPy, and those requests
+   * are only cached if a service worker is already controlling this page. Start
+   * the download first and a first visit pays for it twice: once now, once on
+   * the next launch. So wait for the controller — but never longer than
+   * SW_WAIT, because a registration that never settles must not hold the app
+   * hostage. Repeat visits already have a controller and don't wait at all. */
+  async function bootBehindServiceWorker() {
+    try {
+      await navigator.serviceWorker.register('./service-worker.js', { updateViaCache: 'none' });
+      if (!navigator.serviceWorker.controller) {
+        await Promise.race([
+          new Promise((resolve) => {
+            navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true });
+          }),
+          new Promise((resolve) => { setTimeout(resolve, SW_WAIT); }),
+        ]);
+      }
+    } catch (err) { /* caching is a bonus, not a requirement */ }
+    startWorker();
   }
 
   if (document.readyState === 'loading') {

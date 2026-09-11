@@ -7,6 +7,7 @@ never leaks a Python traceback.
 
 import json
 import re
+import types
 
 import numpy as np
 import sympy as sp
@@ -16,6 +17,7 @@ from sympy.parsing.sympy_parser import (
     parse_expr,
     standard_transformations,
 )
+from sympy.printing.latex import LatexPrinter
 from sympy.printing.str import StrPrinter
 
 TRANSFORMS = standard_transformations + (
@@ -44,6 +46,41 @@ _CONSTANTS = {
     "I": sp.I,
     "nan": sp.nan,
 }
+
+# Physical constants: the name this app reads, SymPy's own attribute, and how
+# the value prints. They are not in _CONSTANTS because they are not constants
+# to the parser — each one reads as an ordinary Symbol, and only a substitute
+# turns it into a value (see op_substitute). That is what keeps `c` usable as
+# a constant of integration and `g` as a plain variable.
+#
+# The elementary charge is `q_e`, not `e`: `e` is Euler's number, and taking
+# that name would silently change the meaning of every `e^x` already sitting
+# in someone's stored history.
+#
+# The LaTeX column is not decoration. SymPy renders a Quantity as its
+# abbreviation inside \text{}, and four of these abbreviate to their own
+# snake_case name — `\text{boltzmann_constant}` is a KaTeX parse error, not a
+# symbol — while the rest abbreviate to something this app does not call them
+# (`me`, and `e` for the elementary charge).
+_PHYSICAL = {
+    "c": ("speed_of_light", "c"),
+    "h": ("planck", "h"),
+    "hbar": ("hbar", r"\hbar"),
+    "k_B": ("boltzmann_constant", "k_{B}"),
+    "G": ("gravitational_constant", "G"),
+    "mu_0": ("magnetic_constant", r"\mu_{0}"),
+    "epsilon_0": ("vacuum_permittivity", r"\varepsilon_{0}"),
+    "N_A": ("avogadro_constant", "N_{A}"),
+    "m_e": ("electron_rest_mass", "m_{e}"),
+    "q_e": ("elementary_charge", "q_{e}"),
+    "g": ("acceleration_due_to_gravity", "g"),
+}
+
+# Keyed by SymPy's spelling, which is how a Quantity names itself when asked.
+_PHYSICAL_BY_SYMPY = {
+    attr: (name, latex) for name, (attr, latex) in _PHYSICAL.items()
+}
+
 
 def _log_base10(value, base=None):
     """`log` means base 10 here; `ln` is the natural log.
@@ -78,9 +115,13 @@ _FUNCTIONS = {
     "cotg": sp.cot, "cossec": sp.csc,
 }
 
-# Order matters: constants shadow bare symbols, functions shadow both.
+# Order matters: constants shadow bare symbols, functions shadow both. The
+# physical names sit with the bare symbols because that is what they are here —
+# `hbar` needs the entry or split_symbols shreds it into h*b*a*r, and the rest
+# are ordinary variables until a substitute resolves them.
 LOCALS = {}
 LOCALS.update(_SYMBOLS)
+LOCALS.update({name: sp.Symbol(name) for name in _PHYSICAL})
 LOCALS.update(_CONSTANTS)
 LOCALS.update(_FUNCTIONS)
 
@@ -106,9 +147,15 @@ class MathError(Exception):
 # simply fall through to English instead of showing a missing-key marker.
 LANGUAGE = "en"
 
+# The last single-expression result, set at the top of compute() from the
+# incoming args. Can't live in LOCALS — that dict is built once at import.
+LAST_ANS = None
+
 MESSAGES = {
     "pt": {
         "Type an expression first.": "Digite uma expressão primeiro.",
+        "Nothing to reuse yet — compute something first.":
+            "Nada para reutilizar ainda — calcule algo primeiro.",
         "An equation needs an expression on both sides of `=`.":
             "Uma equação precisa de expressões dos dois lados do `=`.",
         "“%s” isn’t a valid variable name.":
@@ -127,6 +174,11 @@ MESSAGES = {
             "Sem forma fechada — calculada numericamente.",
         "SymPy couldn’t determine that limit.":
             "O SymPy não conseguiu determinar esse limite.",
+        "Terms": "Termos",
+        "Terms has to be between 1 and 20.": "Termos tem que ser entre 1 e 20.",
+        "SymPy couldn’t expand that here — try another point.":
+            "O SymPy não conseguiu expandir aqui — tente outro ponto.",
+        "without the O term": "sem o termo O",
         "SymPy couldn’t solve that symbolically.":
             "O SymPy não conseguiu resolver isso simbolicamente.",
         "No real solutions — turn on “complex” to see the %d complex root(s).":
@@ -149,6 +201,14 @@ MESSAGES = {
             "Esse passo se afasta do valor final.",
         "Can’t parse that — check your parentheses and operators.":
             "Não consegui interpretar — confira os parênteses e operadores.",
+        "That isn’t an expression — type something like “x^2 + 1”.":
+            "Isso não é uma expressão — digite algo como “x^2 + 1”.",
+        "That function got the wrong number of arguments.":
+            "Essa função recebeu um número errado de argumentos.",
+        "That’s a chained comparison — compare two things at a time, "
+        "like “x < 3”.":
+            "Isso é uma comparação encadeada — compare dois valores por vez, "
+            "como “x < 3”.",
         "That divides by zero.": "Isso divide por zero.",
         "That expression nests too deeply.":
             "A expressão tem aninhamento demais.",
@@ -172,6 +232,18 @@ MESSAGES = {
         "combined fraction": "fração única",
         "decimal": "decimal",
         "solve for": "resolver para",
+        "Give at least one value, like “x = 2”.": "Dê ao menos um valor, como “x = 2”.",
+        "Each value needs an “=”, like “x = 2”.": "Cada valor precisa de um “=”, como “x = 2”.",
+        "The left side of “=” has to be a variable name.":
+            "O lado esquerdo do “=” tem que ser um nome de variável.",
+        "“%s” has no value after the “=”.": "“%s” não tem valor depois do “=”.",
+        "“%s” is given a value twice.": "“%s” recebeu valor duas vezes.",
+        "Those units don’t match up — %s": "Essas unidades não batem — %s",
+        "Those units don’t match up — the terms being added aren’t "
+        "the same kind of quantity.":
+            "Essas unidades não batem — os termos somados não são o mesmo "
+            "tipo de grandeza.",
+        "as written": "como escrito",
         # worked-step labels
         "Constant": "Constante",
         "Constant multiple": "Múltiplo constante",
@@ -217,12 +289,115 @@ def _t(text):
 # parsing
 # --------------------------------------------------------------------------
 
-def _parse(src):
+# `parse_expr` hands back whatever the text describes, and not all of it is an
+# expression: `[1, 2]` is a plain Python list, `{1, 2}` a FiniteSet, `1 < 2` a
+# Boolean. An op that assumes otherwise fails deep inside SymPy, and the failure
+# reaches the user naming a Python type they never typed — `'list' object has
+# no attribute 'subs'`. The two gates below say it in a sentence instead, at the
+# point the source is read. They differ only in how much they accept, because
+# the ops do: `substitute` has to keep answering `x > 1`, which is a Relational
+# and not an Expr, while a derivative or a limit needs the real thing.
+
+_NOT_AN_EXPRESSION = "That isn’t an expression — type something like “x^2 + 1”."
+
+# The two TypeErrors that mean "these do not combine" — see `_parse`. Matched on
+# the message because Python raises the same class for every one of them, and
+# only these two are the parser's own doing rather than the user's.
+_UNCOMBINABLE_RE = re.compile(r"unsupported operand type|multiply sequence")
+
+_WRONG_ARITY = "That function got the wrong number of arguments."
+
+_CHAINED_COMPARISON = (
+    "That’s a chained comparison — compare two things at a time, like “x < 3”."
+)
+
+# CPython's own dialect for a call that doesn't fit the signature: the name,
+# then empty parentheses, then takes/missing/got — "_log_base10() takes from 1
+# to 2 positional arguments but 3 were given". SymPy's Function classes phrase
+# an arity slip differently, with no parentheses on the name — "atan2 takes
+# exactly 2 arguments (1 given)" — which is what tells the two apart, and that
+# one is worth showing: it names a function the user actually typed.
+_BAD_CALL_RE = re.compile(r"\A(?P<name>[^\s()]+)\(\) (?:takes|missing|got) ")
+
+# The names CPython would put in that sentence for the callables this app
+# installs in the namespace — the ones that are plain Python functions rather
+# than SymPy classes. Every one of them is an internal spelling: `_log_base10`
+# is this module's private helper, `<lambda>` is not a name at all, and `root`,
+# `sqrt` and `cbrt` name SymPy's implementation of a key the user pressed. None
+# of them is translated, either. An arity slip on one of these is the app's own
+# to phrase, so `_parse` phrases it.
+_OWN_CALL_NAMES = frozenset(
+    getattr(fn, "__name__", "") for fn in _FUNCTIONS.values()
+    if isinstance(fn, types.FunctionType)
+)
+
+
+def _expression(value):
+    """Insist on an expression — something with arithmetic to do."""
+    if not isinstance(value, sp.Expr):
+        raise MathError(_NOT_AN_EXPRESSION)
+    return value
+
+
+def _symbolic(value):
+    """Insist on something SymPy can walk: an Expr, an Eq, a comparison."""
+    if not isinstance(value, sp.Basic):
+        raise MathError(_NOT_AN_EXPRESSION)
+    return value
+
+
+def _parse(src, extra=None):
     text = (src or "").strip()
     if not text:
         raise MathError("Type an expression first.")
-    expr = parse_expr(text, local_dict=LOCALS, transformations=TRANSFORMS)
-    return sp.sympify(expr)
+    names = LOCALS if extra is None else {**LOCALS, **extra}
+    # Substring test on purpose: it's cheap, and a false positive (a variable
+    # named `answer`) only means the binding is present but unused.
+    if "ans" in text:
+        if LAST_ANS is None:
+            raise MathError("Nothing to reuse yet — compute something first.")
+        names = {**names, "ans": LAST_ANS}
+    try:
+        parsed = parse_expr(text, local_dict=names, transformations=TRANSFORMS)
+    except TypeError as exc:
+        # `parse_expr` evaluates what it builds, so a bare name standing where a
+        # value belongs gets past the syntax check and fails on the implicit
+        # multiplication instead: `2 sin` as "unsupported operand type(s) for *:
+        # 'Integer' and 'FunctionClass'", and `min(1, 2)` inside a binding —
+        # where `min` is the minute — as "can't multiply sequence by non-int of
+        # type 'Quantity'". Neither sentence is about anything the user typed,
+        # so both become the one below.
+        #
+        # Only those two, though. The rest of this branch sorts the remaining
+        # TypeErrors by who they are about, because `_friendly`'s fallback
+        # prints whatever it is handed — and half of what parse_expr raises
+        # here is written in Python's vocabulary, not the app's.
+        message = str(exc)
+        if _UNCOMBINABLE_RE.search(message):
+            raise MathError(_NOT_AN_EXPRESSION)
+
+        # A chained comparison — `1 < x < 3` — is evaluated by Python as
+        # `(1 < x) and (x < 3)`, and `and` asks each Relational for its truth
+        # value: "cannot determine truth value of Relational". That is not a
+        # free variable waiting for a value, whatever it looks like: the
+        # failure happens while the text is being read, before any binding is
+        # applied, so supplying `x = 1` changes nothing. Name the real limit.
+        if "cannot determine truth value" in message:
+            raise MathError(_CHAINED_COMPARISON)
+
+        # An arity slip on one of this app's own callables, phrased by CPython
+        # in terms of the function object it happened to call. `atan2(1)` is
+        # the case this must not catch: SymPy names the function the user
+        # typed and counts its arguments, which is a better sentence than any
+        # of ours.
+        bad_call = _BAD_CALL_RE.match(message)
+        if bad_call and bad_call.group("name") in _OWN_CALL_NAMES:
+            raise MathError(_WRONG_ARITY)
+
+        # Anything left really is about something the user wrote, and says so
+        # in its own words.
+        raise
+    return _check_units(sp.sympify(parsed))
 
 
 def _split_top(text, sep=","):
@@ -266,8 +441,48 @@ def _parse_equation(src):
         left, right = halves
         if not left.strip() or not right.strip():
             raise MathError("An equation needs an expression on both sides of `=`.")
-        return sp.Eq(_parse(left), _parse(right))
+        # `sp.Eq` sympifies what it is handed, so a side that isn't an
+        # expression — `[1, 2] = x`, or `x = [1, 2]` — reaches it as a
+        # SympifyError, and "SympifyError: [1, 2]" is a Python class name in the
+        # interface. The gate says the same thing about the same input, in a
+        # sentence, before Eq ever sees it.
+        equation = sp.Eq(_expression(_parse(left)), _expression(_parse(right)))
+        # Each side was checked alone on its way through `_parse`, and alone
+        # each side of `ans = 1` is beyond reproach — a velocity is a fine
+        # expression and so is 1. The equation is the thing that doesn't hold
+        # up, so the equation is what gets checked, by the same reasoning the
+        # Relational branch uses for `a > b`: `a = b` means something exactly
+        # when `a - b` does.
+        return _check_units(equation)
     return _parse(src)
+
+
+def _bindings(text, parse_value=None):
+    """`x = 2, y = 3` -> [(Symbol('x'), expr), ...].
+
+    `parse_value` overrides how the right-hand side is read, which is how
+    units get in without touching the main expression parser.
+    """
+    read = parse_value or _parse
+    parts = _split_top(text or "")
+    if not parts:
+        raise MathError("Give at least one value, like “x = 2”.")
+
+    pairs, seen = [], set()
+    for part in parts:
+        halves = _split_equation(part)
+        if not halves:
+            raise MathError("Each value needs an “=”, like “x = 2”.")
+        name, raw = halves[0].strip(), halves[1].strip()
+        if not _NAME_RE.match(name):
+            raise MathError("The left side of “=” has to be a variable name.")
+        if not raw:
+            raise MathError("“%s” has no value after the “=”.", name)
+        if name in seen:
+            raise MathError("“%s” is given a value twice.", name)
+        seen.add(name)
+        pairs.append((_sym(name), read(raw)))
+    return pairs
 
 
 def _sym(name):
@@ -299,8 +514,394 @@ def _parse_float(src, label):
 
 
 # --------------------------------------------------------------------------
+# units
+# --------------------------------------------------------------------------
+#
+# The expression parser multiplies implicitly and treats m, s, N, K, c and k as
+# ordinary variables, which is what makes `2m` and `kx` work at all. Unit names
+# would collide with every one of them, so they are layered over LOCALS only
+# when a binding's value is read — never when the expression itself is parsed.
+#
+# Two things below reach past a binding, and deliberately. `_parse_answer`
+# layers the long spellings over LOCALS to re-read a stored result, because a
+# printed Quantity says "meter" and `ans` has to round-trip. `_check_dimensions`
+# runs from `_parse` for every op, because units arriving through `ans` have to
+# be checked wherever they land, not only where they were written.
+
+_UNIT_CACHE = {}
+
+# An explicit allowlist, not a star-import: these names shadow ordinary
+# variables inside a binding's right-hand side, so the set stays reviewable.
+_UNIT_NAMES = (
+    "meter second kilogram gram ampere kelvin mole candela "
+    "newton joule watt volt coulomb farad henry ohm siemens tesla weber "
+    "pascal hertz radian degree liter minute hour day"
+).split()
+
+_UNIT_ALIASES = {
+    "m": "meter", "s": "second", "kg": "kilogram", "g": "gram", "A": "ampere",
+    "K": "kelvin", "mol": "mole", "cd": "candela", "N": "newton", "J": "joule",
+    "W": "watt", "V": "volt", "C": "coulomb", "F": "farad", "H": "henry",
+    "S": "siemens", "T": "tesla", "Wb": "weber", "Pa": "pascal", "Hz": "hertz",
+    "rad": "radian", "L": "liter", "h": "hour", "min": "minute",
+    "Ω": "ohm", "Ohm": "ohm",
+}
+
+# `min` is the one alias that shadows a function rather than a variable, and it
+# is worth it. Inside a binding — the only place any of these are in scope —
+# `x = min(1, 2)` now reads as a Quantity where a call was meant and fails, but
+# it fails in a sentence: `_parse` turns that TypeError into "that isn't an
+# expression" like any other pair of things that do not combine. So the trade is
+# `t = 90 min` working against `min(1, 2)` being spelled `Min(1, 2)` in a
+# binding — capital M is untouched here, and lowercase `min` is still the
+# function everywhere outside one. For a calculator aimed at physics, minutes in
+# a binding are the commoner ask by a distance.
+
+# Powers of ten, not floats: `1 km` has to stay 1000*meter rather than
+# 1000.0*meter and drag a decimal point through every exact result.
+_PREFIXES = {
+    "T": 12, "G": 9, "M": 6, "k": 3, "d": -1, "c": -2,
+    "m": -3, "u": -6, "µ": -6, "μ": -6, "n": -9, "p": -12,
+}
+
+# Prefixed spellings are built over the short aliases — "mmeter" is not a word —
+# plus the long names people really do prefix. `kohm` is the whole of that
+# second list: kHz, mA and km are all written with the alias.
+_PREFIXED_LONG = ("ohm",)
+
+# kg already carries its prefix, and nobody writes mh or kmin.
+_NO_PREFIX = {"kg", "h", "min"}
+
+
+def _unit_names():
+    """Unit names, aliases and prefixed spellings. Built once, on first use."""
+    if _UNIT_CACHE:
+        return _UNIT_CACHE
+
+    # Imported here rather than at module scope: boot time is a headline
+    # property of this app and most sessions never bind a unit.
+    from sympy.physics import units as u
+
+    # No default on the getattr, deliberately. A name SymPy has moved has to
+    # fail loudly: a unit that quietly went missing would leave `4.7 kohm` to
+    # be shredded into stray symbols and answered with a plausible number.
+    base = {name: getattr(u, name) for name in _UNIT_NAMES}
+    for alias, name in _UNIT_ALIASES.items():
+        base[alias] = base[name]
+
+    prefixed = {}
+    for spelling in list(_UNIT_ALIASES) + list(_PREFIXED_LONG):
+        if spelling in _NO_PREFIX:
+            continue
+        for prefix, power in _PREFIXES.items():
+            prefixed.setdefault(
+                prefix + spelling, sp.Integer(10) ** power * base[spelling]
+            )
+
+    _UNIT_CACHE.update(prefixed)
+    _UNIT_CACHE.update(base)  # unprefixed wins on any collision
+    return _UNIT_CACHE
+
+
+_PHYSICAL_CACHE = {}
+
+
+def _physical_names():
+    """The physical constants as Quantity objects. Built once, on first use.
+
+    Deliberately a separate table from the unit namespace rather than folded
+    into it. `h` is an hour and `g` a gram on the right of a binding — that is
+    what `v = 90 km/h` and `m = 500 g` mean — and merging the two dicts would
+    quietly redefine both. These names are resolved after parsing instead, on
+    the symbols a substitute leaves standing — whether they came from the
+    expression or rode in on a binding's value, since `a = 2c` is 2c too.
+    """
+    if _PHYSICAL_CACHE:
+        return _PHYSICAL_CACHE
+
+    # Imported here, not at module scope, for the reason _unit_names gives:
+    # boot time is a headline property and most sessions never touch this.
+    from sympy.physics import units as u
+
+    # No default on the getattr, deliberately, and the same reason as there: a
+    # constant SymPy had moved would otherwise vanish silently, and `m_e*c^2`
+    # would come back as a symbolic product that looks like an answer.
+    _PHYSICAL_CACHE.update(
+        {name: getattr(u, attr) for name, (attr, _) in _PHYSICAL.items()}
+    )
+    return _PHYSICAL_CACHE
+
+
+def _quantities_possible():
+    """True once anything in this session could have put a Quantity in play.
+
+    Only these two tables ever build one, and neither has run while both are
+    empty — so two empty dicts rule units out without importing anything or
+    scanning an expression. Non-empty rules nothing in: `a = 2c` fills the unit
+    cache with no unit in sight, and the caches stay filled afterwards.
+    """
+    return bool(_UNIT_CACHE) or bool(_PHYSICAL_CACHE)
+
+
+# A value with no letter in it cannot name a unit, so `x = 2` skips the unit
+# namespace — and the import behind it — entirely.
+_HAS_LETTER_RE = re.compile(r"[^\W\d_]")
+
+
+def _parse_quantity(text):
+    """Parse a binding's right-hand side, where unit names are in scope."""
+    if not _HAS_LETTER_RE.search(text or ""):
+        return _parse(text)
+    return _parse(text, extra=_unit_names())
+
+
+_LONG_UNIT_RE = re.compile(r"\b(?:%s)\b" % "|".join(_UNIT_NAMES))
+
+
+def _parse_answer(text):
+    """Re-read a stored result, which may have carried units out of substitute.
+
+    Only the long spellings are in scope: a printed Quantity always says
+    "meter", never "m", so `ans` round-trips without `m` meaning a metre
+    anywhere. Left to the ordinary parser, "29.43*meter/second" would be
+    shredded into m*e*t*e*r over s*e*c*o*n*d — visible nonsense, but nonsense
+    the user never asked for.
+    """
+    if not _LONG_UNIT_RE.search(text or ""):
+        return _parse(text)
+    names = _unit_names()
+    return _parse(text, extra={name: names[name] for name in _UNIT_NAMES})
+
+
+# SymPy names the offending quantity in quotes, in its own spelling.
+_QUOTED_NAME_RE = re.compile(r'"([A-Za-z_][A-Za-z0-9_]*)"')
+
+_DIMENSION_OPEN = "Dimension("
+
+
+def _strip_dimensions(text):
+    """Unwrap every `Dimension(...)`, keeping only its first argument.
+
+    A scan rather than a regex, because the argument nests. `Dimension(length)`
+    is easy, but the dimension of `G` is `length**3/(mass*time**2)`, whose own
+    parentheses close the match early — a regex balances nothing, so it either
+    stops at the inner `)` or fails outright and leaves the whole wrapper
+    standing in the sentence. Only the first argument is a word the sentence
+    can use: `Dimension(action, A)` packs the dimension's own abbreviation
+    beside its name, and `A` says nothing to anyone.
+    """
+    out, i = [], 0
+    while True:
+        start = text.find(_DIMENSION_OPEN, i)
+        if start < 0:
+            out.append(text[i:])
+            return "".join(out)
+        out.append(text[i:start])
+
+        # Walk from the opening bracket to the one that closes it, noting the
+        # first comma that separates arguments rather than nesting inside one.
+        opened = start + len(_DIMENSION_OPEN) - 1
+        depth, end, comma = 0, -1, -1
+        for j in range(opened, len(text)):
+            char = text[j]
+            if char in "([{":
+                depth += 1
+            elif char in ")]}":
+                depth -= 1
+                if depth == 0:
+                    end = j
+                    break
+            elif char == "," and depth == 1 and comma < 0:
+                comma = j
+        if end < 0:
+            # Unbalanced, so there is nothing to unwrap with any confidence.
+            # Leave the remainder exactly as SymPy wrote it.
+            out.append(text[start:])
+            return "".join(out)
+
+        inner = text[opened + 1:comma if comma >= 0 else end]
+        out.append(_strip_dimensions(inner))
+        i = end + 1
+
+
+def _unit_mismatch(exc):
+    """SymPy's dimension complaint, in this app's spelling.
+
+    Two rewritings. The Dimension(...) wrapping goes, along with the symbol
+    SymPy packs beside the dimension's name. And the quantity is renamed:
+    SymPy calls it `speed_of_light` and `planck`, but `c` and `h` are what the
+    user typed and the only names this app has ever shown them.
+
+    Guarded, because this already runs on the way to telling the user their
+    units are wrong. Untranslated SymPy vocabulary is a poor message; a second
+    failure here would replace their answer with a traceback, which is worse.
+    """
+    raw = str(exc)
+    try:
+        text = _strip_dimensions(raw).strip().rstrip(".")
+        return _QUOTED_NAME_RE.sub(
+            lambda m: '"%s"' % _PHYSICAL_BY_SYMPY.get(m.group(1), (m.group(1),))[0],
+            text,
+        )
+    except Exception:
+        return raw.strip().rstrip(".")
+
+
+def _has_units(expr):
+    from sympy.physics.units import Quantity
+
+    return bool(expr.atoms(Quantity))
+
+
+# What `_check_dimensions` can take apart. A Boolean is here for the comparison
+# it holds, not for itself; everything else parse_expr can return — a list, a
+# Tuple, a FiniteSet — has no dimensions to disagree about.
+_CHECKABLE = (sp.Expr, sp.logic.boolalg.Boolean)
+
+
+def _check_units(expr):
+    """Dimension-check `expr` when there is anything there to check.
+
+    The one gate every parse goes through, so that "mismatched dimensions are
+    an error, not a silent number" holds wherever units arrive. They arrive in
+    more places than substitute: `ans + 1` on 29.43 m/s is parsed by whichever
+    op the user is in, and `ans = 1` is built half at a time by
+    `_parse_equation`, which is why that one hands the assembled equation back
+    here rather than trusting the two halves it checked separately.
+
+    Nothing has built a Quantity until a binding value held a letter or a
+    substitute resolved a constant, so `_quantities_possible()` rules units out
+    cheaply. It rules nothing in — `a = 2c` arms it.
+
+    The `_CHECKABLE` test is about what `_check_dimensions` knows how to read,
+    not about atoms — it skips the plain list parse_expr hands back for
+    `[1, 2]`, and the FiniteSet it hands back for `{1, 2}`. Comparisons are in,
+    not out: `ans > 1` on a velocity is a mismatch like any other, and the fact
+    that a Relational has no factor and dimension of its own is why it needs
+    taking apart there rather than skipping here.
+    """
+    if _quantities_possible() and isinstance(expr, _CHECKABLE) and _has_units(expr):
+        _check_dimensions(expr)
+    return expr
+
+
+def _check_dimensions(expr):
+    """Raise a MathError when the units in `expr` disagree.
+
+    Catching this is the whole point of the feature: adding a velocity to an
+    acceleration has to be an error, not a number that looks plausible.
+    """
+    from sympy.physics.units.systems.si import SI
+    from sympy.physics.units.util import check_dimensions
+
+    # A comparison has no dimension of its own, and SymPy does not go looking
+    # for one: `_collect_factor_and_dimension` hands back Dimension(1) for any
+    # Relational without reading it, which is how `ans > 1` on 29.43 m/s came
+    # back as a plain True. Dimensionally `a > b` is `a - b` — the comparison
+    # means something exactly when the subtraction does — so that is what gets
+    # checked, and checking the difference rather than one side at a time is
+    # what catches `ans > 1`, where each side is beyond reproach alone.
+    if isinstance(expr, sp.core.relational.Relational):
+        left, right = expr.args
+        if isinstance(left, sp.Expr) and isinstance(right, sp.Expr):
+            _check_dimensions(left - right)
+        return
+
+    # `&` builds an And over comparisons, and each one still has to hold up.
+    if not isinstance(expr, sp.Expr):
+        for arg in expr.args:
+            if isinstance(arg, _CHECKABLE) and _has_units(arg):
+                _check_dimensions(arg)
+        return
+
+    if expr.free_symbols:
+        # An unbound symbol could carry any dimension, so the strict check
+        # below would call `x + 2 m` a mismatch. This one is the lenient
+        # version: it only objects when the unit-bearing terms already
+        # disagree among themselves. Its message is a dump of Dimension
+        # objects, so none of it is worth passing on.
+        try:
+            check_dimensions(expr)
+        except ValueError:
+            raise MathError(
+                "Those units don’t match up — the terms being added aren’t "
+                "the same kind of quantity."
+            )
+        return
+
+    # Private, and the only API that both checks and explains itself: it names
+    # the offending term and both dimensions.
+    try:
+        SI._collect_factor_and_dimension(expr)
+    except ValueError as exc:
+        raise MathError("Those units don’t match up — %s", _unit_mismatch(exc))
+
+
+def _to_si(expr):
+    """Fold units together: ohm*ampere -> volt, meter/hour -> meter/second."""
+    from sympy.physics.units.systems.si import SI
+    from sympy.physics.units.util import quantity_simplify
+
+    try:
+        folded = quantity_simplify(expr, across_dimensions=True, unit_system=SI)
+    except Exception:
+        # Normalising is a courtesy — the substitution already answered the
+        # question, and its dimensions were checked before we got here.
+        return expr
+    return _expand_constants(folded)
+
+
+# The seven SI base units, which every constant can be written in terms of.
+_SI_BASE = ("kilogram", "meter", "second", "ampere", "kelvin", "mole", "candela")
+
+
+def _expand_constants(expr):
+    """Give a constant folding could not name its number, in base units.
+
+    `_to_si` folds a dimension SymPy has an SI unit for — h*f is a joule, and
+    that is the form worth showing. It has no unit for what `h` alone measures,
+    though, so `h` survives folding untouched and the answer to `h` would be
+    `h`. Rewriting the leftovers in kg, m, s, A, K, mol and cd is what turns
+    those back into numbers — `N_A * 2 mol` into a count rather than a symbol.
+    """
+    if not _PHYSICAL_CACHE or not isinstance(expr, sp.Expr):
+        return expr
+
+    from sympy.physics.units import Quantity
+
+    left = {q for q in expr.atoms(Quantity) if str(q.name) in _PHYSICAL_BY_SYMPY}
+    if not left:
+        return expr
+
+    from sympy.physics.units.systems.si import SI
+    from sympy.physics.units.util import convert_to
+
+    units = _unit_names()
+    try:
+        expanded = convert_to(expr, [units[name] for name in _SI_BASE], unit_system=SI)
+    except Exception:
+        return expr
+    # convert_to returns the input unchanged when it cannot do the conversion,
+    # and a half-expanded answer is worse than the folded one.
+    if not isinstance(expanded, sp.Expr) or expanded.atoms(Quantity) & left:
+        return expr
+    return expanded
+
+
+# --------------------------------------------------------------------------
 # formatting helpers
 # --------------------------------------------------------------------------
+
+def _is_quantity(expr):
+    """True for a Quantity, without importing the units module to ask.
+
+    The class name alone is not the test: SymPy's physical constants are a
+    Quantity subclass called PhysicalConstant. This sits in front of every node
+    the LaTeX printer visits, so it stays a walk over a short tuple of names
+    rather than an import at module scope.
+    """
+    return any(base.__name__ == "Quantity" for base in type(expr).__mro__)
+
 
 class _NablaStrPrinter(StrPrinter):
     """SymPy's internal natural log is `log`; here `log` means base 10.
@@ -316,12 +917,42 @@ class _NablaStrPrinter(StrPrinter):
         # Copied text should paste back into this app's own input syntax.
         return "e"
 
+    def _print_Quantity(self, expr):
+        # Same rule: an answer holding Planck's constant has to copy — and come
+        # back through `ans` — as `h`, which this app reads. SymPy calls it
+        # `planck`, which is a name in none of these namespaces and would be
+        # shredded into a product of six letters on the way back in.
+        known = _PHYSICAL_BY_SYMPY.get(str(expr.name))
+        return known[0] if known else super()._print_Quantity(expr)
+
 
 _STR_PRINTER = _NablaStrPrinter()
 
 
+class _NablaLatexPrinter(LatexPrinter):
+    """Prints the physical constants the way this app spells them.
+
+    Quantity carries its own `_latex` method, and the base printer reaches that
+    before any `_print_Quantity` a subclass could define — so the intercept has
+    to happen in `_print` itself. What it replaces is worth replacing: SymPy
+    renders a Quantity as its abbreviation inside \\text{}, so the Boltzmann
+    constant comes out as `\\text{boltzmann_constant}`, and an underscore in
+    text mode is a KaTeX parse error rather than a subscript.
+    """
+
+    def _print(self, expr, **kwargs):
+        if _is_quantity(expr):
+            known = _PHYSICAL_BY_SYMPY.get(str(expr.name))
+            if known:
+                return known[1]
+        return super()._print(expr, **kwargs)
+
+
+_LATEX_PRINTER = _NablaLatexPrinter({"ln_notation": True})
+
+
 def _latex(expr):
-    return sp.latex(expr, ln_notation=True)
+    return _LATEX_PRINTER.doprint(expr)
 
 
 def _text(expr):
@@ -357,6 +988,60 @@ def _approx(expr, digits=12):
             return None
         return _trim_zeros(_text(value))
     except Exception:
+        return None
+
+
+def _decimal_alternate(expr):
+    """The `decimal` alternate for a result, units included.
+
+    `_approx` refuses anything holding a Quantity — a unit expression is never
+    `is_number` — so without this the answers most in need of a decimal are the
+    only ones that never get one: `3*kilogram/1000` and `200*meter/(9*second)`
+    are exact and unreadable, and the same sums without units offer a decimal.
+    The number is rounded and the units put back on.
+    """
+    plain = _approx(expr)
+    if plain is not None:
+        if plain == _text(expr):
+            return None
+        return {"label": _t("decimal"), "latex": plain, "text": plain}
+
+    # Not every result is an ordinary expression: `x > 1` substitutes to a
+    # Boolean, and a Boolean has no coefficient to split off. A Quantity being
+    # possible says only that: `a = 2c` arms it with no unit in sight, so it
+    # cannot stand in for that test.
+    if not _quantities_possible() or not isinstance(expr, sp.Expr) or expr.free_symbols:
+        return None
+
+    try:
+        # Split by what carries a unit, not by `as_coeff_Mul()`. That splits off
+        # a Rational and leaves everything else with the units, so `4*pi*m^2`
+        # arrives as coeff 4 — an integer, nothing to round — and `sqrt(13)*m`
+        # as coeff 1. Both are exactly the answers most in need of a decimal,
+        # and both used to fall through the guards below and offer none, while
+        # the same sums without units offered one.
+        number, units = sp.S.One, sp.S.One
+        for factor in sp.Mul.make_args(expr):
+            if _has_units(factor):
+                units *= factor
+            else:
+                number *= factor
+
+        # No unit factor means no number was held back from `_approx` above, so
+        # there is nothing here it did not already decline. An integer is
+        # already exact, and a bare 1 is what an unfolded sum of unit terms
+        # leaves behind — neither is worth a second line.
+        if units == 1 or number.is_Integer:
+            return None
+        decimal = _approx(number)
+        if decimal is None:
+            return None
+        shown = sp.Float(decimal) * units
+        if _text(shown) == _text(expr):
+            return None
+        return {"label": _t("decimal"), **_fmt(shown)}
+    except Exception:
+        # An alternate is a courtesy; it never costs the answer itself.
         return None
 
 
@@ -673,7 +1358,7 @@ def op_preview(source="", mode=""):
     if mode == "plot":
         parts = _split_top(source)
         if len(parts) > 1:
-            exprs = [_parse(p) for p in parts]
+            exprs = [_expression(_parse(p)) for p in parts]
             names = sorted({s.name for e in exprs for s in e.free_symbols})
             return {
                 "latex": r",\quad ".join(_latex(e) for e in exprs),
@@ -685,7 +1370,7 @@ def op_preview(source="", mode=""):
 
 
 def op_derivative(source="", variable="x", order=1):
-    expr = _parse(source)
+    expr = _expression(_parse(source))
     var = _sym(variable)
     try:
         order = int(order)
@@ -718,7 +1403,7 @@ def op_derivative(source="", variable="x", order=1):
 
 
 def op_integral(source="", variable="x", lower=None, upper=None):
-    expr = _parse(source)
+    expr = _expression(_parse(source))
     var = _sym(variable)
     definite = bool((lower or "").strip()) and bool((upper or "").strip())
 
@@ -770,7 +1455,7 @@ def op_integral(source="", variable="x", lower=None, upper=None):
 
 
 def op_limit(source="", variable="x", point="0", direction="+-"):
-    expr = _parse(source)
+    expr = _expression(_parse(source))
     var = _sym(variable)
     target = _parse_point(point)
     if direction not in ("+", "-", "+-"):
@@ -791,6 +1476,33 @@ def op_limit(source="", variable="x", point="0", direction="+-"):
         alternates.append({"label": "decimal", "latex": decimal, "text": decimal})
 
     return {"statement": statement, "alternates": alternates, **_fmt(result)}
+
+
+def op_series(source="", variable="x", about="0", order="6"):
+    expr = _expression(_parse(source))
+    var = _sym(variable)
+    point = _parse_point(about)
+
+    count = int(_parse_float(order, "Terms"))
+    if count < 1 or count > 20:
+        raise MathError("Terms has to be between 1 and 20.")
+
+    try:
+        expansion = sp.series(expr, var, point, count)
+    except (NotImplementedError, sp.PoleError):
+        raise MathError("SymPy couldn’t expand that here — try another point.")
+
+    truncated = expansion.removeO()
+    alternates = []
+    entry = _alternate("without the O term", truncated, expansion)
+    if entry:
+        alternates.append(entry)
+
+    return {
+        "statement": r"%s,\quad %s \to %s" % (_latex(expr), _latex(var), _latex(point)),
+        "alternates": alternates,
+        **_fmt(expansion),
+    }
 
 
 def op_simplify(source=""):
@@ -823,8 +1535,70 @@ def op_simplify(source=""):
     }
 
 
+def op_substitute(source="", at=""):
+    # `_symbolic`, not `_expression`: substituting into a comparison is a fair
+    # question — `x > 1` at `x = 2` is True — and a Relational is not an Expr.
+    expr = _symbolic(_parse(source))
+    pairs = _bindings(at, parse_value=_parse_quantity)
+
+    # simultaneous keeps `x = y, y = x` a swap rather than a cascade.
+    result = expr.subs(pairs, simultaneous=True)
+
+    # A name you bind yourself is yours: `c = 3` means three, not the speed of
+    # light. Running after the bindings is what enforces that — a bound name is
+    # already gone from the result — and `bound` covers the leftovers, so that
+    # `c = 2c` keeps the c the user meant. The statement still shows what was
+    # typed, because it is `expr` that is echoed there, not this.
+    #
+    # The test is a string comparison against names already in hand: an
+    # expression with no constant in it never builds the table, let alone
+    # imports it.
+    bound = {sym.name for sym, _ in pairs}
+    if isinstance(result, sp.Basic):
+        wanted = {
+            sym for sym in result.free_symbols
+            if sym.name in _PHYSICAL and sym.name not in bound
+        }
+        if wanted:
+            values = _physical_names()
+            result = result.subs({sym: values[sym.name] for sym in wanted})
+
+    # Only these two tables ever build a Quantity, and neither has run while
+    # both are empty — so empty rules units out. Full rules nothing in: any
+    # binding value holding a letter fills the unit one, units or not.
+    has_units = _quantities_possible() and _has_units(result)
+
+    if has_units:
+        _check_dimensions(result)
+        simplified = _to_si(result)
+    else:
+        simplified = _try_simplify(result)
+
+    alternates = []
+    decimal = _decimal_alternate(simplified)
+    if decimal:
+        alternates.append(decimal)
+    if has_units:
+        # The raw substitution, when normalising moved it: 9.4*ampere*ohm
+        # beside 9.4*volt says more than either does alone.
+        entry = _alternate("as written", result, simplified)
+        if entry:
+            alternates.append(entry)
+
+    given = r",\; ".join("%s = %s" % (_latex(sym), _latex(val)) for sym, val in pairs)
+    return {
+        "statement": r"%s,\quad %s" % (_latex(expr), given),
+        "alternates": alternates,
+        **_fmt(simplified),
+    }
+
+
 def op_solve(source="", variable="x", complex_roots=False):
-    parsed = _parse_equation(source)
+    # Same latitude as substitute: an inequality is something to solve. A list
+    # is not, and `_parse_equation` is where that gets said — both for `[1,2]`
+    # standing alone, caught by `_symbolic` here, and for `[1,2] = x`, where
+    # `sp.Eq` would otherwise sympify it into a SympifyError.
+    parsed = _symbolic(_parse_equation(source))
     var = _sym(variable)
     equation = parsed if isinstance(parsed, sp.Eq) else sp.Eq(parsed, 0)
 
@@ -888,7 +1662,7 @@ def op_plot(source="", x_min="-10", x_max="10", samples=700):
     series, pool = [], []
 
     for part in parts:
-        expr = _parse(part)
+        expr = _expression(_parse(part))
         free = sorted(expr.free_symbols, key=lambda s: s.name)
         if len(free) > 1:
             raise MathError(
@@ -896,16 +1670,19 @@ def op_plot(source="", x_min="-10", x_max="10", samples=700):
             )
         var = free[0] if free else sp.Symbol("x")
 
+        # The cast to float is inside the try, not after it: a unit-bearing
+        # `ans` lambdifies fine and only fails here, and outside it that
+        # failure escapes as SymPy's own untranslated "Cannot convert
+        # expression to float" instead of the message below.
         try:
             fn = sp.lambdify(var, expr, modules=["numpy"])
             with np.errstate(all="ignore"):
                 raw = np.asarray(fn(xs))
+            if np.iscomplexobj(raw):
+                raw = np.where(np.abs(raw.imag) < 1e-9, raw.real, np.nan)
+            ys = np.asarray(raw, dtype=float) + np.zeros_like(xs)
         except Exception:
             raise MathError("Couldn’t evaluate “%s” numerically.", part)
-
-        if np.iscomplexobj(raw):
-            raw = np.where(np.abs(raw.imag) < 1e-9, raw.real, np.nan)
-        ys = np.asarray(raw, dtype=float) + np.zeros_like(xs)
 
         # Break the line at jump discontinuities so asymptotes aren't drawn as
         # vertical strokes. A jump is a step far larger than the typical step.
@@ -950,7 +1727,7 @@ def op_plot(source="", x_min="-10", x_max="10", samples=700):
 
 
 def op_table(source="", variable="x", start="-5", stop="5", step="1"):
-    expr = _parse(source)
+    expr = _expression(_parse(source))
     var = _sym(variable)
     begin = _parse_float(start, "Start")
     end = _parse_float(stop, "Stop")
@@ -966,16 +1743,17 @@ def op_table(source="", variable="x", start="-5", stop="5", step="1"):
     total = min(total, 400)
 
     xs = begin + increment * np.arange(total)
+    # Inside the try for the reason op_plot gives: a unit-bearing `ans` gets
+    # this far and fails on the cast, and only here is the message translated.
     try:
         fn = sp.lambdify(var, expr, modules=["numpy"])
         with np.errstate(all="ignore"):
             raw = np.asarray(fn(xs))
+        if np.iscomplexobj(raw):
+            raw = np.where(np.abs(raw.imag) < 1e-9, raw.real, np.nan)
+        ys = np.asarray(raw, dtype=float) + np.zeros_like(xs)
     except Exception:
         raise MathError("Couldn’t evaluate that function numerically.")
-
-    if np.iscomplexobj(raw):
-        raw = np.where(np.abs(raw.imag) < 1e-9, raw.real, np.nan)
-    ys = np.asarray(raw, dtype=float) + np.zeros_like(xs)
 
     return {
         "statement": r"%s(%s) = %s" % ("f", _latex(var), _latex(expr)),
@@ -994,7 +1772,9 @@ OPERATIONS = {
     "derivative": op_derivative,
     "integral": op_integral,
     "limit": op_limit,
+    "series": op_series,
     "simplify": op_simplify,
+    "substitute": op_substitute,
     "solve": op_solve,
     "plot": op_plot,
     "table": op_table,
@@ -1037,6 +1817,7 @@ def set_language(lang):
 
 def compute(op, args_json, lang="en"):
     """Single entry point. Always returns a JSON string, never raises."""
+    global LAST_ANS
     set_language(lang)
     try:
         handler = OPERATIONS[op]
@@ -1045,6 +1826,10 @@ def compute(op, args_json, lang="en"):
 
     try:
         args = json.loads(args_json) if args_json else {}
+        previous = args.pop("ans", None)
+        # Parsed inside this try on purpose: a malformed stored answer becomes
+        # an ordinary translated error instead of crashing the worker.
+        LAST_ANS = _parse_answer(previous) if previous else None
         return json.dumps({"ok": True, "data": handler(**args)})
     except Exception as exc:  # noqa: BLE001 — every failure must reach the user
         return json.dumps({"ok": False, "error": _friendly(exc)})

@@ -42,11 +42,14 @@
       'op.derivative': 'Derivative',
       'op.integral': 'Integral',
       'op.limit': 'Limit',
+      'op.series': 'Series',
       'op.simplify': 'Simplify',
+      'op.substitute': 'Substitute',
       'op.solve': 'Solve',
       'op.plot': 'Plot',
       'op.table': 'Table',
 
+      'chip.series': 'series',
       'chip.simplify': 'simplify',
       'chip.solve': 'solve',
       'chip.plot': 'plot',
@@ -54,6 +57,8 @@
 
       'field.wrt': 'wrt',
       'field.order': 'order',
+      'field.about': 'about',
+      'field.terms': 'terms',
       'field.d': 'd',
       'field.from': 'from',
       'field.to': 'to',
@@ -62,6 +67,7 @@
       'field.both': 'both',
       'field.for': 'for',
       'field.complex': 'complex',
+      'field.at': 'at',
       'field.xFrom': 'x from',
       'field.step': 'step',
 
@@ -109,6 +115,9 @@
       'keypad.show': 'Show keypad',
       'keypad.backspace': 'Backspace',
       'keypad.label': 'Math keypad',
+      'keypad.ops': 'ops',
+      'keypad.names': 'names',
+      'nav.change': 'Change operation',
 
       'entry.placeholder': 'Expression',
       'entry.compute': 'Compute',
@@ -156,11 +165,14 @@
       'op.derivative': 'Derivada',
       'op.integral': 'Integral',
       'op.limit': 'Limite',
+      'op.series': 'Série',
       'op.simplify': 'Simplificar',
+      'op.substitute': 'Substituir',
       'op.solve': 'Resolver',
       'op.plot': 'Gráfico',
       'op.table': 'Tabela',
 
+      'chip.series': 'série',
       'chip.simplify': 'simplificar',
       'chip.solve': 'resolver',
       'chip.plot': 'gráfico',
@@ -168,6 +180,8 @@
 
       'field.wrt': 'em',
       'field.order': 'ordem',
+      'field.about': 'em torno de',
+      'field.terms': 'termos',
       'field.d': 'd',
       'field.from': 'de',
       'field.to': 'até',
@@ -176,6 +190,7 @@
       'field.both': 'ambos',
       'field.for': 'para',
       'field.complex': 'complexo',
+      'field.at': 'em',
       'field.xFrom': 'x de',
       'field.step': 'passo',
 
@@ -223,6 +238,9 @@
       'keypad.show': 'Mostrar teclado',
       'keypad.backspace': 'Apagar',
       'keypad.label': 'Teclado matemático',
+      'keypad.ops': 'oper',
+      'keypad.names': 'nomes',
+      'nav.change': 'Trocar operação',
 
       'entry.placeholder': 'Expressão',
       'entry.compute': 'Calcular',

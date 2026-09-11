@@ -65,10 +65,35 @@ service-worker.js     network-first shell, cache-first vendor payload
 icons/                generated — see tools/make-icons.mjs
 src/math.py           SymPy kernel; every op returns JSON, never raises
 src/worker.js         Pyodide host
+src/pyodide-pin.js    the Pyodide version, shared by both workers
 src/app.js            UI, state, history, charts
 src/style.css         design tokens and layout
 tools/make-icons.mjs  dependency-free PNG icon generator
+tools/smoke.mjs       dependency-free smoke tests, driven through headless Chrome
 ```
+
+**Two cache generations, deliberately separate.** `VERSION` names the shell
+cache and moves on every deploy; `VENDOR_VERSION` names the jsdelivr cache and
+moves only when a pinned URL does. Tying them together would mean every CSS
+tweak evicted ~25 MB of Pyodide and SymPy and re-downloaded all of it — the
+vendor URLs are immutable, so that cache is meant to outlive deploys.
+
+**The page waits for its service worker on a first visit.** Pyodide is only
+cached if a worker is already controlling the page, so starting the download
+first would make a first visit pay for it twice. `app.js` registers, waits for
+`controllerchange`, then starts the compute worker — capped at `SW_WAIT`, since
+a registration that never settles must not hold the app hostage. Repeat visits
+already have a controller and don't wait.
+
+**Every pinned URL carries an integrity hash**, and the Pyodide version lives in
+one file both workers `importScripts()`. Two copies of that string would drift
+silently: the cache would warm a build nothing requests, and offline boots would
+stop working with nothing to show for it.
+
+**Network reads give up after 3 s when there's a cached fallback.** A captive
+portal or a lie-fi connection leaves `fetch()` hanging far longer than the cache
+takes to answer. With nothing cached there's no timeout — a slow answer still
+beats no answer.
 
 **SymPy runs in a web worker.** A hard `integrate()` can block for seconds; on
 the main thread that would freeze scrolling and every control on the page — the
@@ -129,6 +154,49 @@ shed and the write retried.
 - Leave both integral bounds empty for an indefinite integral.
 - Plot takes up to four comma-separated functions; commas inside a call like
   `log(x, 2)` are handled.
+- `ans` is the last single-expression result — derivative, integral, limit,
+  series, simplify or substitute. Solve is excluded because "the answer" is
+  ambiguous with several roots, and plots and tables are not single values.
+- Units are understood on the right-hand side of a substitute binding —
+  `a = 9.81 m/s^2` — and nowhere else. That is deliberate: it keeps `m`, `s`
+  and `N` usable as ordinary variables in the expression itself. Mismatched
+  dimensions are an error rather than a silent number.
+  SI prefixes come along (`4.7 kohm`, `2 mA`, `2.4 GHz`), and the answer is
+  folded back to SI: `90 km/h` reads as `25 m/s`, `4.7 kohm · 2 mA` as
+  `9.4 V`, with the unfolded form kept as an alternate.
+- Physical constants — `c`, `h`, `hbar`, `k_B`, `G`, `g`, `mu_0`, `epsilon_0`,
+  `N_A`, `m_e`, `q_e` — read as named symbols in an expression and resolve to
+  values with units inside a substitute: `m*c^2` with `m = 1 kg` is
+  `89875517873681764 J`. A name you bind yourself is yours, so `c = 3` means
+  three — which is what keeps `c` usable as a constant of integration, and `g`,
+  `h` and `G` as ordinary variables. The elementary charge is `q_e`, not `e`:
+  `e` is Euler's number, and reassigning it would change the meaning of every
+  `e^x` already written.
+  The converse is worth knowing too: inside a substitute an *unbound* one of
+  these names is the physical value, whether it came from the expression or
+  from a binding. `x^2 + c` at `x = 2` is a dimension error rather than
+  `4 + c`, because a velocity cannot be added to a number, and `a = 2c` binds
+  `a` to `599584916 m/s`. Bind the name if you meant a variable.
+  The constants are a namespace of their own, not part of the unit one, so on
+  the right of a binding `h` is still an hour and `g` still a gram —
+  `m = 500 g` with `m*g` is `4.903325 N`. `c` has no unit meaning, so there it
+  keeps the physical one.
+
+## Tests
+
+```sh
+node tools/smoke.mjs          # every group
+node tools/smoke.mjs units    # one group
+```
+
+No dependencies and no test framework: the script serves the repo, launches
+headless Chrome and drives it over the DevTools protocol, asserting against the
+real app. The service worker, the Pyodide worker and the keypad only exist in a
+browser, so that is where they get tested. Chrome has to be on `PATH` —
+`google-chrome`, `chromium` or one of their variants. First run pays for the
+Pyodide download; the exit code is non-zero if anything fails.
+
+Groups: `boot`, `nav`, `substitute`, `units`, `ans`, `series`, `constants`.
 
 ## Regenerating icons
 
