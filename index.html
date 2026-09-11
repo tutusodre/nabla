@@ -83,6 +83,12 @@
     </div>
   </header>
 
+  <!-- Shown instead of the boot overlay on a return visit: the engine is still
+       waking, but history, export, theme and language never needed it. -->
+  <div class="waking" id="waking" hidden role="progressbar" data-i18n-title="boot.waking">
+    <i id="wakingBar"></i>
+  </div>
+
   <footer class="composer" id="composer">
     <nav class="chips" id="chips" aria-label="Operation"></nav>
     <div class="params" id="params"></div>

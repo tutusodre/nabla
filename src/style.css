@@ -181,6 +181,25 @@ code {
 
 .boot--failed .boot__mark { animation: none; color: var(--error); }
 
+/* The warm-start counterpart to the boot overlay: a hairline of progress under
+ * the topbar instead of a wall across the app. Amber rather than the boot
+ * bar's accent: this one is background progress, not the thing you're waiting
+ * on. */
+.waking {
+  position: relative;
+  height: 2px;
+  background: var(--rule);
+  overflow: hidden;
+}
+.waking i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--amber);
+  transition: width 0.3s ease;
+}
+.waking[hidden] { display: none; }
+
 /* -------------------------------------------------------------- topbar --- */
 
 .topbar {

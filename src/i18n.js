@@ -121,6 +121,7 @@
 
       'entry.placeholder': 'Expression',
       'entry.compute': 'Compute',
+      'entry.queued': 'Waiting for the engine',
       'entry.computing': 'Computing',
       'entry.stop': 'Stop',
 
@@ -244,6 +245,7 @@
 
       'entry.placeholder': 'Expressão',
       'entry.compute': 'Calcular',
+      'entry.queued': 'Esperando o motor',
       'entry.computing': 'Calculando',
       'entry.stop': 'Parar',
 
