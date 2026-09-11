@@ -74,7 +74,7 @@
       fields: [
         { name: 'variable', labelKey: 'field.wrt', kind: 'var', value: 'x' },
         { name: 'about', labelKey: 'field.about', kind: 'text', value: '0' },
-        { name: 'order', labelKey: 'field.terms', kind: 'int', value: '6' },
+        { name: 'terms', labelKey: 'field.terms', kind: 'int', value: '4' },
       ],
       meta: (params) => `${params.variable} → ${params.about}`,
     },

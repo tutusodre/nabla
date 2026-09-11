@@ -174,11 +174,11 @@ MESSAGES = {
             "Sem forma fechada — calculada numericamente.",
         "SymPy couldn’t determine that limit.":
             "O SymPy não conseguiu determinar esse limite.",
-        "Terms": "Termos",
-        "Terms has to be between 1 and 20.": "Termos tem que ser entre 1 e 20.",
+        "Order": "Ordem",
+        "Order has to be between 1 and 20.": "A ordem tem que ser entre 1 e 20.",
         "SymPy couldn’t expand that here — try another point.":
             "O SymPy não conseguiu expandir aqui — tente outro ponto.",
-        "without the O term": "sem o termo O",
+        "with the remainder": "com o resto",
         "SymPy couldn’t solve that symbolically.":
             "O SymPy não conseguiu resolver isso simbolicamente.",
         "No real solutions — turn on “complex” to see the %d complex root(s).":
@@ -1478,30 +1478,48 @@ def op_limit(source="", variable="x", point="0", direction="+-"):
     return {"statement": statement, "alternates": alternates, **_fmt(result)}
 
 
-def op_series(source="", variable="x", about="0", order="6"):
+def op_series(source="", variable="x", about="0", terms="4"):
     expr = _expression(_parse(source))
     var = _sym(variable)
     point = _parse_point(about)
 
-    count = int(_parse_float(order, "Terms"))
+    count = int(_parse_float(terms, "Terms"))
     if count < 1 or count > 20:
         raise MathError("Terms has to be between 1 and 20.")
 
     try:
-        expansion = sp.series(expr, var, point, count)
+        # n=None hands back the non-zero terms one at a time, so `count` means
+        # what the field says: three terms of sin(x) is x - x**3/6 + x**5/120,
+        # whatever span of powers that happens to cover. Passing an order
+        # instead would have made "3" mean something different per function.
+        produced = []
+        for term in expr.series(var, point, n=None):
+            produced.append(term)
+            if len(produced) > count:
+                break
     except (NotImplementedError, sp.PoleError):
         raise MathError("SymPy couldn’t expand that here — try another point.")
 
-    truncated = expansion.removeO()
+    # One term past the count tells us where the truncation bites; it is not
+    # shown, only used to name the remainder.
+    remainder = produced.pop() if len(produced) > count else None
+    if not produced:
+        raise MathError("SymPy couldn’t expand that here — try another point.")
+    shown = sp.Add(*produced)
+
     alternates = []
-    entry = _alternate("without the O term", truncated, expansion)
-    if entry:
-        alternates.append(entry)
+    if remainder is not None:
+        # The honest form, one tap away: what is shown is an approximation, and
+        # this says how big the part left out is.
+        entry = _alternate("with the remainder",
+                           shown + sp.O(remainder, (var, point)), shown)
+        if entry:
+            alternates.append(entry)
 
     return {
         "statement": r"%s,\quad %s \to %s" % (_latex(expr), _latex(var), _latex(point)),
         "alternates": alternates,
-        **_fmt(expansion),
+        **_fmt(shown),
     }
 
 

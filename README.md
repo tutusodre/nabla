@@ -115,6 +115,13 @@ asymptotes are gaps rather than vertical strokes. The y-range comes from the 1st
 and 99th percentiles, so one near-asymptote value cannot flatten the whole
 curve.
 
+**Series shows the terms you asked for.** The field counts terms, not order:
+three terms of `sin(x)` is `x - x³/6 + x⁵/120`, whatever span of powers that
+covers. SymPy's own argument is an order cutoff, which would have made "3"
+mean a different number of terms for every function. The bounded form, with
+the `O(...)` remainder that says how much was left out, is offered as an
+alternate rather than being the headline.
+
 **Worked steps** are available for derivatives and integrals, collapsed behind
 a `steps` toggle on the card, and included in the Markdown export.
 

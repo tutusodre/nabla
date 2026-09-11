@@ -56,7 +56,7 @@
       'chip.table': 'table',
 
       'field.wrt': 'wrt',
-      'field.order': 'order',
+      'field.terms': 'terms',
       'field.about': 'about',
       'field.terms': 'terms',
       'field.d': 'd',
@@ -180,7 +180,7 @@
       'chip.table': 'tabela',
 
       'field.wrt': 'em',
-      'field.order': 'ordem',
+      'field.terms': 'termos',
       'field.about': 'em torno de',
       'field.terms': 'termos',
       'field.d': 'd',
