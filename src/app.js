@@ -74,7 +74,7 @@
       fields: [
         { name: 'variable', labelKey: 'field.wrt', kind: 'var', value: 'x' },
         { name: 'about', labelKey: 'field.about', kind: 'text', value: '0' },
-        { name: 'order', labelKey: 'field.terms', kind: 'int', value: '6' },
+        { name: 'terms', labelKey: 'field.terms', kind: 'int', value: '4' },
       ],
       meta: (params) => `${params.variable} → ${params.about}`,
     },
@@ -950,6 +950,17 @@
       tex(plate, data.latex, true);
     }
     card.appendChild(plate);
+
+    /* The same expansion as one sigma, directly under the terms it summarises.
+     * Only present when SymPy found the pattern; most functions have none. */
+    if (data.closed) {
+      const closed = node('div', 'card__closed');
+      closed.appendChild(node('span', 'card__closedLabel', t('card.asSum')));
+      const body = node('span');
+      tex(body, data.closed.latex, true);
+      closed.appendChild(body);
+      card.appendChild(closed);
+    }
 
     if (data.note) card.appendChild(node('p', 'card__note', data.note));
     if (data.hidden_complex) {

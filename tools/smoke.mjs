@@ -953,17 +953,16 @@ const GROUPS = {
     check('ans is the newest answer, not the first',
       card && !card.failed && /42\s*x/.test(card.text), card?.text);
 
-    /* A series qualifies too — the O(...) term re-parses, so an expansion is
-     * a reusable answer and `ans` must not reach past it to an older one. The
-     * O term is the assertion: reaching past would land on 42x^5, which has
-     * none. */
+    /* A series qualifies too, and `ans` must not reach past it to an older
+     * answer. The x^7 term carries the assertion: four terms of sin(x) end in
+     * -x^7/5040, and reaching past would land on 42x^5, which has no 5040. */
     await app.tapKey('series');
     await app.enter('sin(x)');
     await app.tapKey('simplify');
     await app.enter('ans');
     card = await app.lastCard();
     check('a series expansion is a reusable answer',
-      card && !card.failed && /O\(/.test(card.text), card?.text);
+      card && !card.failed && /5040/.test(card.text), card?.text);
 
     await s.eval('localStorage.clear()');
     await s.open(APP);
@@ -983,22 +982,64 @@ const GROUPS = {
     check('series key selects it',
       await app.tapKey('series') && await app.currentOp() === 'series');
 
+    /* The field counts terms, so three terms of sin(x) must be exactly
+     * x - x^3/6 + x^5/120 — three of them, spanning powers 1 to 5. Asking for
+     * an order instead would have given only two. */
+    await app.setField('terms', '3');
     await app.enter('sin(x)');
     let card = await app.lastCard();
-    check('expansion has the leading terms',
-      card && !card.failed && /x/.test(card.text) && /6/.test(card.text), card?.text);
-    check('the O term is shown', card && /O\(/.test(card.text), card?.text);
+    check('three terms means three terms',
+      card && !card.failed && /120/.test(card.text) && !/5040/.test(card.text), card?.text);
+    // Scoped to the result plate: the alternate legitimately carries an O.
+    const plate = await s.eval(
+      `document.querySelector('.card .card__result')?.innerText.replace(/\\s+/g, ' ') || ''`);
+    check('the result itself is not cluttered with O(...)', !/O\(/.test(plate), plate);
+    check('the bounded form is still offered', card && /remainder|resto/i.test(card.text),
+      card?.text);
 
+    /* The same expansion as one sigma, under the terms. sin(x) has a closed
+     * form; SymPy finds none for most functions, which is not an error. */
+    const sum = await s.eval(
+      `document.querySelector('.card')?.querySelector('.card__closed')
+         ?.innerText.replace(/\\s+/g, ' ') || ''`);
+    check('the closed form is shown as a sum', /AS A SUM|COMO SOMA/i.test(sum), sum);
+    check('and it is a sigma over n, not a repeat of the terms',
+      /∑/.test(sum) && /n/.test(sum) && !/5040/.test(sum), sum);
+
+    // The table takes the user's own argument, so this is not just a name match.
+    await app.enter('sin(2*x)');
+    const composed = await s.eval(
+      `document.querySelector('.card')?.querySelector('.card__closed')
+         ?.innerText.replace(/\\s+/g, ' ') || ''`);
+    check('a composed argument gets a sum too', /∑/.test(composed), composed);
+
+    await app.setField('terms', '5');
+    await app.enter('sin(x)');
+    card = await app.lastCard();
+    check('asking for more terms gives more', card && !card.failed && /362880/.test(card.text),
+      card?.text);
+
+    await app.setField('terms', '4');
     await app.setField('about', '1');
     await app.enter('log(x)');
     card = await app.lastCard();
     check('expansion about a point works', card && !card.failed, card?.text);
 
+    // A function with no closed form must still expand, just without the sigma.
     await app.setField('about', '0');
-    await app.setField('order', 'x');
+    await app.setField('terms', '3');
+    await app.enter('exp(sin(x))');
+    card = await app.lastCard();
+    const none = await s.eval(
+      `!!document.querySelector('.card')?.querySelector('.card__closed')`);
+    check('an expansion with no closed form still works',
+      card && !card.failed && /x/.test(card.text), card?.text);
+    check('and simply omits the sum', none === false, String(none));
+
+    await app.setField('terms', 'x');
     await app.enter('sin(x)');
     card = await app.lastCard();
-    check('a non-numeric order is caught', card && card.failed, card?.text);
+    check('a non-numeric term count is caught', card && card.failed, card?.text);
 
     check('no console errors', s.errors.length === 0, s.errors.join(' | '));
   },

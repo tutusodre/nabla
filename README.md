@@ -115,6 +115,25 @@ asymptotes are gaps rather than vertical strokes. The y-range comes from the 1st
 and 99th percentiles, so one near-asymptote value cannot flatten the whole
 curve.
 
+**Series shows the terms you asked for.** The field counts terms, not order:
+three terms of `sin(x)` is `x - x³/6 + x⁵/120`, whatever span of powers that
+covers. SymPy's own argument is an order cutoff, which would have made "3"
+mean a different number of terms for every function. The bounded form, with
+the `O(...)` remainder that says how much was left out, is offered as an
+alternate rather than being the headline.
+
+The same expansion is also shown as a single sigma, directly under the terms,
+when that can be *proved*. SymPy's own `fps` can express these, but as a
+`Piecewise` over `RisingFactorial` — correct, and unreadable for exactly the
+functions people try first. So the sigma comes from a small table matched on
+the outer function and given the user's own argument (`sin(2x)` and
+`exp(-x^2)` are covered, not just the bare forms), and it is then checked by
+summing it back: if `doit()` does not reproduce what was typed, nothing is
+shown. A wrong entry can only ever disappear, never render a plausible lie.
+The argument must be a single power of the variable, or the sigma would be a
+series in something other than the terms above it — `exp(sin(x))` really is
+the sum of `sin(x)^n/n!`, but that is not the expansion on display.
+
 **Worked steps** are available for derivatives and integrals, collapsed behind
 a `steps` toggle on the card, and included in the Markdown export.
 

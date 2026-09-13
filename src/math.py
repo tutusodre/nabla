@@ -174,11 +174,11 @@ MESSAGES = {
             "Sem forma fechada — calculada numericamente.",
         "SymPy couldn’t determine that limit.":
             "O SymPy não conseguiu determinar esse limite.",
-        "Terms": "Termos",
-        "Terms has to be between 1 and 20.": "Termos tem que ser entre 1 e 20.",
+        "Order": "Ordem",
+        "Order has to be between 1 and 20.": "A ordem tem que ser entre 1 e 20.",
         "SymPy couldn’t expand that here — try another point.":
             "O SymPy não conseguiu expandir aqui — tente outro ponto.",
-        "without the O term": "sem o termo O",
+        "with the remainder": "com o resto",
         "SymPy couldn’t solve that symbolically.":
             "O SymPy não conseguiu resolver isso simbolicamente.",
         "No real solutions — turn on “complex” to see the %d complex root(s).":
@@ -1478,30 +1478,107 @@ def op_limit(source="", variable="x", point="0", direction="+-"):
     return {"statement": statement, "alternates": alternates, **_fmt(result)}
 
 
-def op_series(source="", variable="x", about="0", order="6"):
+# Sigma forms for the expansions a physics course actually asks for. SymPy's
+# own fps() can express these too, but as a Piecewise over RisingFactorial —
+# correct, and unreadable for exactly the functions people try first.
+_SUM_FORMS = (
+    (sp.sin, lambda u, n: (-1) ** n * u ** (2 * n + 1) / sp.factorial(2 * n + 1)),
+    (sp.cos, lambda u, n: (-1) ** n * u ** (2 * n) / sp.factorial(2 * n)),
+    (sp.exp, lambda u, n: u ** n / sp.factorial(n)),
+    (sp.sinh, lambda u, n: u ** (2 * n + 1) / sp.factorial(2 * n + 1)),
+    (sp.cosh, lambda u, n: u ** (2 * n) / sp.factorial(2 * n)),
+)
+
+
+def _closed_series(expr, var, point):
+    """The expansion as one sigma, shown only when it can be proved.
+
+    The table above is matched against the outer function and given the user's
+    own argument, so sin(2x) and exp(-x**2) are covered as well as the bare
+    forms. It is then checked by summing it back: if doit() does not reproduce
+    what was typed, nothing is shown. A wrong entry can only ever disappear,
+    never render a plausible lie — the same reasoning that keeps limit and
+    simplify from inventing worked steps.
+
+    Only about zero: these are Maclaurin series, and expanding elsewhere is not
+    what they say.
+    """
+    if point != 0:
+        return None
+
+    n = sp.Symbol("n", integer=True, nonnegative=True)
+    for head, build in _SUM_FORMS:
+        if not isinstance(expr, head):
+            continue
+        argument = expr.args[0]
+        if var not in argument.free_symbols:
+            return None
+
+        # The argument has to be a single power of the variable — 2*x, x/3,
+        # -x**2. Otherwise the sigma is a series in something else: exp(sin(x))
+        # really is the sum of sin(x)**n/n!, but that describes powers of
+        # sin(x), not the powers of x listed above it.
+        try:
+            powers = sp.Poly(argument, var).terms()
+        except sp.PolynomialError:
+            return None
+        if len(powers) != 1 or powers[0][0][0] == 0:
+            return None
+        total = sp.Sum(build(argument, n), (n, 0, sp.oo))
+        try:
+            if sp.simplify(total.doit() - expr) != 0:
+                return None
+        except Exception:
+            return None
+        return _fmt(total)
+    return None
+
+
+def op_series(source="", variable="x", about="0", terms="4"):
     expr = _expression(_parse(source))
     var = _sym(variable)
     point = _parse_point(about)
 
-    count = int(_parse_float(order, "Terms"))
+    count = int(_parse_float(terms, "Terms"))
     if count < 1 or count > 20:
         raise MathError("Terms has to be between 1 and 20.")
 
     try:
-        expansion = sp.series(expr, var, point, count)
+        # n=None hands back the non-zero terms one at a time, so `count` means
+        # what the field says: three terms of sin(x) is x - x**3/6 + x**5/120,
+        # whatever span of powers that happens to cover. Passing an order
+        # instead would have made "3" mean something different per function.
+        produced = []
+        for term in expr.series(var, point, n=None):
+            produced.append(term)
+            if len(produced) > count:
+                break
     except (NotImplementedError, sp.PoleError):
         raise MathError("SymPy couldn’t expand that here — try another point.")
 
-    truncated = expansion.removeO()
+    # One term past the count tells us where the truncation bites; it is not
+    # shown, only used to name the remainder.
+    remainder = produced.pop() if len(produced) > count else None
+    if not produced:
+        raise MathError("SymPy couldn’t expand that here — try another point.")
+    shown = sp.Add(*produced)
+
+    closed = _closed_series(expr, var, point)
+
     alternates = []
-    entry = _alternate("without the O term", truncated, expansion)
-    if entry:
-        alternates.append(entry)
+    if remainder is not None:
+        # The honest form, one tap away: what is shown is an approximation, and
+        # this says how big the part left out is.
+        entry = _alternate("with the remainder",
+                           shown + sp.O(remainder, (var, point)), shown)
+        if entry:
+            alternates.append(entry)
 
     return {
         "statement": r"%s,\quad %s \to %s" % (_latex(expr), _latex(var), _latex(point)),
         "alternates": alternates,
-        **_fmt(expansion),
+        "closed": closed,
+        **_fmt(shown),
     }
 
 
